@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>浏览器自动化 + 微信桥 — 技术白皮书</title>
+<style>
+  :root {
+    --bg: #0a0908; --card: #141210; --border: rgba(200,168,124,.1);
+    --text: #e8ddd0; --muted: #8a8074; --accent: #c8a87c;
+    --green: #4ade80; --red: #f87171; --blue: #60a5fa; --purple: #c084fc; --orange: #fb923c;
+  }
+  * { box-sizing:border-box;margin:0;padding:0 }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text);line-height:1.75 }
+  ::selection { background:rgba(200,168,124,.25);color:var(--text) }
+
+  .hero { text-align:center;padding:100px 24px 60px }
+  .hero h1 { font-size:clamp(26px,5vw,44px);font-weight:700 }
+  .hero h1 span { color:var(--accent) }
+  .hero p { color:var(--muted);font-size:15px;margin-top:12px;max-width:520px;margin-inline:auto }
+
+  .container { max-width:880px;margin:0 auto;padding:0 24px }
+
+  section { margin:80px 0 }
+  section h2 { font-size:clamp(22px,3.5vw,30px);font-weight:700;margin-bottom:12px }
+  section h2 .num { color:var(--accent);font-size:14px;font-weight:600;letter-spacing:.05em;display:block;margin-bottom:6px }
+  section .intro { color:var(--muted);font-size:15px;max-width:600px;margin-bottom:28px }
+
+  /* Stack cards */
+  .stack { background:var(--card);border:1px solid var(--border);border-radius:14px;padding:32px;margin:20px 0 }
+  .stack h3 { font-size:17px;color:var(--accent);margin-bottom:8px }
+  .stack .tagline { color:var(--muted);font-size:13px;margin-bottom:16px }
+  .stack p { font-size:14px;color:var(--text);margin-bottom:12px }
+
+  /* Comparison table */
+  .compare { width:100%;border-collapse:collapse;font-size:14px;margin:20px 0 }
+  .compare th { text-align:left;padding:10px 14px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border) }
+  .compare td { padding:10px 14px;border-bottom:1px solid rgba(200,168,124,.04);vertical-align:top }
+  .compare .win { color:var(--green) }
+  .compare .lose { color:var(--red) }
+  .compare .same { color:var(--muted) }
+
+  /* Code inline */
+  code { font-family:'JetBrains Mono',monospace;font-size:13px;background:rgba(200,168,124,.06);padding:1px 6px;border-radius:4px;color:var(--accent) }
+  pre { background:rgba(0,0,0,.35);border-radius:10px;padding:22px;overflow-x:auto;font-size:12px;line-height:1.6;margin:16px 0 }
+  pre code { background:none;padding:0;border-radius:0;color:var(--text) }
+  pre .kw { color:var(--purple) }
+  pre .fn { color:var(--accent) }
+  pre .str { color:var(--green) }
+  pre .cmt { color:var(--muted) }
+
+  /* Innovation badge */
+  .badge { display:inline-block;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:600;letter-spacing:.03em }
+  .badge.novel { background:rgba(74,222,128,.1);color:var(--green);border:1px solid rgba(74,222,128,.2) }
+  .badge.standard { background:rgba(96,165,250,.08);color:var(--blue);border:1px solid rgba(96,165,250,.15) }
+  .badge.best { background:rgba(251,146,60,.08);color:var(--orange);border:1px solid rgba(251,146,60,.15) }
+
+  /* Verdict box */
+  .verdict { margin:28px 0;padding:22px 26px;border-radius:12px;font-size:14px }
+  .verdict.g { background:rgba(74,222,128,.05);border:1px solid rgba(74,222,128,.12) }
+  .verdict.b { background:rgba(96,165,250,.05);border:1px solid rgba(96,165,250,.12) }
+  .verdict strong { color:var(--accent) }
+
+  .footer { text-align:center;padding:60px 24px;color:var(--muted);font-size:13px;border-top:1px solid var(--border);margin-top:80px }
+
+  @media (max-width:600px) { .hero { padding:60px 16px 40px } .stack { padding:22px } }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1><span>技术白皮书</span></h1>
+  <p>浏览器自动化 + 微信桥的完整技术栈、与行业主流方案的对齐分析、以及可量化的创新点</p>
+</div>
+
+<div class="container">
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§1</span>CDP 直接控制 vs 自动化框架</h2>
+  <div class="intro">这是整个系统最底层的技术选型——用什么方式操控浏览器。</div>
+
+  <div class="stack">
+    <h3>我们的选择：直接 CDP</h3>
+    <div class="tagline">通过 <code>chrome.debugger</code> API 发送原始 CDP 命令（v1.3），不经任何中间层</div>
+    <table class="compare">
+      <tr><th>维度</th><th>CDP 直接 (我们)</th><th>Playwright / Puppeteer</th><th>Selenium WebDriver</th></tr>
+      <tr>
+        <td>反爬检测</td>
+        <td class="win">无 <code>navigator.webdriver</code> 标记，输入走真实管线</td>
+        <td class="lose">Playwright 默认带 automation 标记；Puppeteer 需额外 patch</td>
+        <td class="lose"><code>navigator.webdriver=true</code>，几乎所有反爬系统第一时间封</td>
+      </tr>
+      <tr>
+        <td>浏览器进程</td>
+        <td class="win">用户自己的 Edge/Chrome，完整个人资料、Cookie、登录态</td>
+        <td class="lose">独立 browser context，每次要重新登录、过验证码</td>
+        <td class="lose">独立 driver 进程，同上</td>
+      </tr>
+      <tr>
+        <td>输入真实性</td>
+        <td class="win"><code>Input.dispatchMouseEvent</code> + <code>Input.insertText</code> — 和真人完全一样的协议层事件</td>
+        <td class="same">底层也是 CDP，效果相同。但 <code>page.click()</code> 不传坐标时有降级</td>
+        <td class="lose">WebDriver 协议在浏览器外模拟，可信度低于 CDP 原生事件</td>
+      </tr>
+      <tr>
+        <td>API 易用性</td>
+        <td class="lose">需手写 CDP 命令（<code>{"method":"Input.dispatchMouseEvent","params":{...}}</code>）</td>
+        <td class="win"><code>await page.click('.btn')</code> — 一句搞定</td>
+        <td class="win"><code>driver.findElement(...).click()</code></td>
+      </tr>
+    </table>
+    <p style="margin-top:16px"><span class="badge best">行业对齐</span> 与 <strong>QoderWork Browser Connector v1.5.1</strong> 和 <strong>browser-use (Python)</strong> 的技术路线一致——都选择原始 CDP 而非包装框架，核心理由是反爬绕过能力。Chrome DevTools MCP 项目（Google 官方，issue #1794）也确认了"多个 AI 工具通过独立 subprocess 连接同一个 CDP endpoint"的架构。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§2</span>元素定位：Ref + WeakRef vs CSS Selector / XPath</h2>
+  <div class="intro">AI 需要精准点到某个按钮。怎么"描述"那个按钮？</div>
+
+  <div class="stack">
+    <table class="compare">
+      <tr><th>方案</th><th>示例</th><th>SPA 重渲染后</th><th>可读性(AI)</th></tr>
+      <tr><td><strong>Ref ID (我们)</strong></td><td><code>[ref_48]</code></td><td class="win">WeakRef — 元素被移除后自动变 null，不报错，重新 read_page 即可</td><td class="win">极好 — AI 只需记住编号</td></tr>
+      <tr><td>CSS Selector</td><td><code>.search-box > input[type="text"]</code></td><td class="lose">类名/结构变了就失效</td><td class="same">中等 — 需理解 DOM 层级</td></tr>
+      <tr><td>XPath</td><td><code>//div[@class='card']/span[2]</code></td><td class="lose">同上,且更脆弱</td><td class="lose">差 — 极冗长</td></tr>
+      <tr><td>ARIA Role + Name</td><td><code>role="searchbox" name="搜索"</code></td><td class="win">语义稳定,但非所有元素有 ARIA</td><td class="win">好 — AI 能理解语义</td></tr>
+    </table>
+    <p style="margin-top:16px"><span class="badge novel">创新点</span> <strong>Ref + WeakRef + 惰性坐标解析</strong>：每个元素在生成时绑一个 <code>WeakRef</code>，只在 AI 实际要点击时才调用 <code>getBoundingClientRect()</code> 获取坐标。这样 SPA 路由切换后元素移动了也能拿到最新位置；被移除的 WeakRef 自动变 null 不会导致空指针错误。这个组合在现有 browser MCP 实现中未见到。</p>
+    <p><span class="badge standard">行业标准</span> WeakRef 是 ES2021 标准，在内存敏感场景（如元素缓存）正确使用。Chrome DevTools Protocol 自身的 <code>DOM.getBoxModel</code> 也用类似惰性机制。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§3</span>合成输入 vs DOM 事件</h2>
+  <div class="intro">填表、点击——区别在于是"浏览器认为你在点"还是"网页认为你在点"。</div>
+
+  <div class="stack">
+    <h3>逐字符 ASCII 输入</h3>
+    <pre><code><span class="cmt">// 每个 ASCII 字符 = 3 次 CDP 调用 + 20ms 延迟</span>
+<span class="kw">Input.dispatchKeyEvent</span>({ type: <span class="str">'keyDown'</span>,  key: <span class="str">'a'</span> })
+<span class="kw">Input.dispatchKeyEvent</span>({ type: <span class="str">'char'</span>,    key: <span class="str">'a'</span> })
+<span class="kw">Input.dispatchKeyEvent</span>({ type: <span class="str">'keyUp'</span>,    key: <span class="str">'a'</span> })
+
+<span class="cmt">// 中文 = Input.insertText + 10-30ms 随机延迟</span>
+<span class="kw">Input.insertText</span>({ text: <span class="str">'中'</span> })
+<span class="kw">Input.insertText</span>({ text: <span class="str">'文'</span> })</code></pre>
+
+    <table class="compare" style="margin-top:16px">
+      <tr><th>方法</th><th>事件层</th><th>小红书/B站/知乎检测？</th></tr>
+      <tr><td><code>element.value = "hello"</code></td><td class="lose">无事件 — React 不知道值变了</td><td class="lose">不触发检测,但表单不起作用</td></tr>
+      <tr><td><code>element.dispatchEvent(new InputEvent(...))</code></td><td class="same">DOM 层 — 大部分监听器能捕获</td><td class="lose">容易被 <code>isTrusted=false</code> 识破</td></tr>
+      <tr><td><code>Input.dispatchKeyEvent</code> (CDP)</td><td class="win">浏览器内核层 — JS 看到和真键盘一模一样</td><td class="win"><code>isTrusted=true</code>,无法区分</td></tr>
+    </table>
+    <p style="margin-top:16px"><span class="badge best">行业对齐</span> 点击流程 <code>mouseMoved(50ms)→mousePressed(50ms)→mouseReleased</code> 是 Playwright 和 Puppeteer 底层使用的同一套 CDP 方法。加入 50ms 延迟不是技术需要而是行为模拟（真人不可能 0ms 完成按下到释放）。已验证小红书、知乎、B站均未触发验证码。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§4</span>React/Vue 表单填充：Prototype Setter 劫持</h2>
+
+  <div class="stack">
+    <h3>问题</h3>
+    <p>React 和 Vue 使用"受控组件"模式——其框架级的 state 管理通过 <code>Object.defineProperty</code> / <code>Proxy</code> 劫持了 input 的 value setter。直接 <code>input.value = "张三"</code> 不触发 React 的 setState,Vue 的 v-model 也不会同步。框架的"内部状态"和 DOM 的"表面值"不同步。</p>
+
+    <pre><code><span class="cmt">// 原生 setter — 拿到原始 value 属性的 descriptor</span>
+<span class="kw">const</span> nativeSetter = Object.getOwnPropertyDescriptor(
+  HTMLInputElement.prototype, <span class="str">'value'</span>
+).set;
+
+<span class="cmt">// 用原生 setter 写入 → React 的劫持者收到"真实用户输入"事件</span>
+nativeSetter.call(input, <span class="str">'张三'</span>);
+input.dispatchEvent(<span class="kw">new</span> Event(<span class="str">'input'</span>, { bubbles: <span class="kw">true</span> }));
+input.dispatchEvent(<span class="kw">new</span> Event(<span class="str">'change'</span>, { bubbles: <span class="kw">true</span> }));</code></pre>
+
+    <p style="margin-top:16px"><span class="badge standard">行业标准</span> 与 <strong>Cypress</strong> 和 <strong>Testing Library</strong> 使用的技术相同——它们也用原生 setter + 事件冒泡来模拟用户输入。不是新发明,但在 CDP 驱动的浏览器自动化中正确执行需要额外注意:先在 CDP 输入管线中触发（让 React 的合成事件系统收到），再补发原生 DOM 事件（让监听原生事件的框架收到）。两套事件都发，保证框架的受控组件更新。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§5</span>Chrome Extension MV3：保活与通信</h2>
+
+  <div class="stack">
+    <h3>双轨保活</h3>
+    <p>MV3 强制使用 Service Worker (SW)，SW 在 30 秒无消息后被浏览器回收。保活是每个 MV3 扩展必须解决的工程问题。</p>
+
+    <table class="compare">
+      <tr><th>方案</th><th>机制</th><th>不足</th></tr>
+      <tr>
+        <td><code>setInterval</code> 25s</td>
+        <td>每 25 秒写一次 <code>chrome.storage.local</code>，产生"活动"防止 SW 被回收</td>
+        <td>macOS 合盖或系统挂起时 setInterval 被暂停，SW 会在恢复后被回收</td>
+      </tr>
+      <tr>
+        <td><code>chrome.alarms</code> 0.5min</td>
+        <td>系统级闹钟——不受 JS 事件循环暂停影响，到点唤醒 SW</td>
+        <td>最小间隔 30 秒;唤醒后需重新初始化 WebSocket 连接</td>
+      </tr>
+      <tr>
+        <td><strong>双轨 (我们)</strong></td>
+        <td class="win">setInterval 25s 防日常回收 + alarms 0.5min 防睡眠后回收</td>
+        <td class="same">稍多 CPU，但可忽略</td>
+      </tr>
+    </table>
+    <p style="margin-top:16px"><span class="badge novel">创新点</span> 双轨互补策略在现有 MV3 扩展中不常见——大多数只用一个保活方案。已验证:<strong>合盖+插电</strong>场景下所有浏览器工具持续可用。</p>
+  </div>
+
+  <div class="stack" style="margin-top:16px">
+    <h3>WebSocket 通信 (端口 19222)</h3>
+    <p>为什么是 WebSocket 而非 chrome.runtime.sendMessage？因为 MCP Server 是独立 Node.js 进程,不在 Chrome 进程内，和扩展通信需要一个跨进程通道。WebSocket over <code>127.0.0.1</code> 是最简单的选择:不暴露网络、零配置、全双工。</p>
+    <p><span class="badge standard">行业标准</span> Chrome DevTools Protocol 自身就用 WebSocket (连到 <code>--remote-debugging-port</code> 时暴露的 WS endpoint)。Playwright 的 <code>browserServer.wsEndpoint()</code> 也是 WebSocket。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§6</span>多 Session 共享: Client-Fallback + id 路由 <span class="badge novel">核心创新</span></h2>
+
+  <div class="intro">这是整个项目最具原创性的架构决策——标准的 stdio MCP 不支持多个 Claude Code 实例共享同一后端资源。</div>
+
+  <div class="stack">
+    <h3>问题:两个 Claude Code,一个浏览器</h3>
+    <p>终端 session 和微信端子 session 是两个独立的 Claude Code 进程,各自按 MCP stdio 协议 spawn 自己的 Browser MCP 进程。两个进程都想 bind <code>127.0.0.1:19222</code> → 第二个 <code>EADDRINUSE</code> 失败。</p>
+
+    <h3>我们怎么解决的</h3>
+    <pre><code><span class="cmt">// 进程 A → bind 19222 成功 → Server 模式</span>
+<span class="fn">[MCP] Server mode: listening on 19222</span>
+<span class="fn">[MCP] Extension connected (server mode)</span>
+
+<span class="cmt">// 进程 B → bind 19222 失败 → Client 模式 → 连到进程 A</span>
+<span class="fn">[MCP] Port 19222 taken, switching to client mode</span>
+<span class="fn">[MCP] Client mode: connected to shared server 19222</span></code></pre>
+
+    <h3>Server 进程 B 发来的 tool_call — 需要 id 路由,否则多个 client 的回复全混</h3>
+    <pre><code><span class="cmt">// Client B → Server: tool_call { id: 3, tool: "tabs_context" }</span>
+<span class="cmt">// Server 重写 id → 发给扩展: tool_call { id: "r42", tool: "tabs_context" }</span>
+<span class="cmt">// 路由表记录: "r42" → { clientWs: B的socket, clientId: 3 }</span>
+routeTable.set(<span class="str">'r42'</span>, { clientWs, clientId: <span class="kw">3</span> });
+
+<span class="cmt">// 扩展回包 → Server 查表 → 还原 id → 发给 Client B</span>
+<span class="kw">if</span> (routeTable.has(msg.id)) {
+  <span class="kw">const</span> { clientWs, clientId } = routeTable.get(msg.id);
+  clientWs.send({ ...msg, id: clientId }); <span class="cmt">// id 还原为 3</span>
+}</code></pre>
+
+    <p style="margin-top:16px"><span class="badge novel">创新点：单侧 id 重写</span> 路由表只在 Server 进程维护,Client 进程完全无感——它不知道自己的 id 被改过,也不需要知道。这个模式的简洁性在于:<strong>Client 进程的代码不需要任何修改</strong>,标准 stdio MCP 协议完全兼容。已有文献和现有多 session 共享方案通常建议用 daemon 模式 (launchd/systemd) 或 Unix socket,但我们用纯 WebSocket + id 路由在 stdio MCP 框架内解决了同一个问题。</p>
+    <p><span class="badge standard">参考</span> Chrome DevTools MCP (issue #1794) 讨论了"多个 AI 浏览器工具使用不同 subprocess 并行连接"的架构——他们依赖 Chrome 自身的多客户端支持。我们的情况比他们更复杂:瓶颈不在 Chrome 的 CDP 端口,而在 MCP 进程到 Extension 的 WebSocket 跳。所以我们的路由方案解决的是更下层的问题。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§7</span>Visual Indicator：Shadow DOM 隔离 <span class="badge standard">标准实践</span></h2>
+
+  <div class="stack">
+    <p>在 AI 操作浏览器时,用户需要看到"哪个元素被点了"、"正在干什么"。直接在页面 DOM 里插 div 会跟网页 CSS 打架（比如页面设了 <code>* { margin:0 }</code>）。</p>
+    <p>解决：用 <strong>Shadow DOM</strong>（Web Components 标准,浏览器原生支持）创建一个独立的渲染空间。Shadow root 里的样式完全不受外部 CSS 影响,反之亦然——页面永远看不到高亮框的样式,高亮框也永远不会被页面的 <code>display:none !important</code> 隐藏。</p>
+    <pre><code><span class="kw">const</span> container = document.createElement(<span class="str">'div'</span>);
+container.id = <span class="str">'cc-shadow-container'</span>;
+<span class="kw">const</span> shadow = container.<span class="fn">attachShadow</span>({ mode: <span class="str">'open'</span> });
+<span class="cmt">// CSS isolation: zero interference with page styles</span></code></pre>
+    <p style="margin-top:12px"><span class="badge standard">行业标准</span> Shadow DOM 隔离是浏览器扩展 overlay 的标准做法（如 Grammarly、LastPass）。不是新发明但正确应用。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§8</span>MCP 协议: stdio Transport + 工具注册</h2>
+
+  <div class="stack">
+    <p>遵循 Anthropic 官方的 <strong>@modelcontextprotocol/sdk</strong> (v1.0+),使用 <code>StdioServerTransport</code> 作为传输层。每个 MCP 工具注册包含完整的 JSON Schema 描述:</p>
+    <pre><code>{
+  name: <span class="str">'computer'</span>,
+  description: <span class="str">'鼠标/键盘/截图交互。13 种 action...'</span>,
+  inputSchema: {
+    type: <span class="str">'object'</span>,
+    properties: {
+      action: { type: <span class="str">'string'</span>, enum: [
+        <span class="str">'left_click'</span>,<span class="str">'right_click'</span>,<span class="str">'double_click'</span>,
+        <span class="str">'type'</span>,<span class="str">'screenshot'</span>,<span class="str">'scroll'</span>, ...
+      ]},
+      ref:     { type: <span class="str">'string'</span> },
+      text:    { type: <span class="str">'string'</span> },
+    },
+    required: [<span class="str">'action'</span>]
+  }
+}</code></pre>
+    <p style="margin-top:12px"><span class="badge standard">行业标准</span> MCP SDK 的 stdio transport + JSON Schema 工具注册是完全标准的做法，与 Anthropic 官方示例和其他 MCP 服务器（如 Chrome DevTools MCP、Figma MCP）一致。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§9</span>Content Scripts 架构: 单一职责的四个模块</h2>
+
+  <div class="stack">
+    <table class="compare">
+      <tr><th>模块</th><th>行数</th><th>职责</th><th>技术要点</th></tr>
+      <tr>
+        <td><code>accessibility-tree.js</code></td>
+        <td>140</td>
+        <td>ARIA 元素树生成</td>
+        <td>WeakRef 映射、isInteractive() 含 20+ ARIA 角色、惰性坐标解析</td>
+      </tr>
+      <tr>
+        <td><code>page-bridge.js</code></td>
+        <td>113</td>
+        <td>表单填充 + 纯文本提取</td>
+        <td>prototype setter、article/main 优先提取、contentEditable 支持</td>
+      </tr>
+      <tr>
+        <td><code>auto-capture.js</code></td>
+        <td>121</td>
+        <td>HTML→Markdown</td>
+        <td>语义元素遍历、懒加载图片过滤、嵌套列表递归、表格/代码块/链接保留</td>
+      </tr>
+      <tr>
+        <td><code>visual-indicator.js</code></td>
+        <td>189</td>
+        <td>Shadow DOM 可视化</td>
+        <td>脉冲动画高亮、状态徽章、停止按钮、全独立 CSS</td>
+      </tr>
+    </table>
+    <p style="margin-top:16px"><span class="badge standard">行业标准</span> 单一职责的 Content Script 拆分是 Manifest V3 的最佳实践。类比 Playwright 的 <code>page.evaluate()</code> + <code>page.$eval()</code> 各管各的,只是我们把逻辑分到了四个独立的注入脚本中,避免单文件过大且不可测试。</p>
+  </div>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§10</span>创新点汇总</h2>
+
+  <table class="compare">
+    <tr><th>#</th><th>技术</th><th>创新程度</th><th>说明</th></tr>
+    <tr>
+      <td>1</td>
+      <td>Client-fallback + id 路由</td>
+      <td><span class="badge novel">原创</span></td>
+      <td>纯 stdio MCP 内实现多 session 进程级共享,无需 daemon 或外部协调。已知 MCP 部署中未见过同类方案</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>双轨保活 (setInterval + alarms)</td>
+      <td><span class="badge novel">MV3 创新</span></td>
+      <td>互补冗余确保合盖+插电可用。多数 MV3 扩展只用一种保活</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>WeakRef + 惰性坐标解析</td>
+      <td><span class="badge novel">新颖组合</span></td>
+      <td>WeakRef 在浏览器自动化中不常见。与惰性坐标解析组合解决了 SPA 重渲染的经典痛点</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Prototype setter + CDP 双管线表单填充</td>
+      <td><span class="badge standard">标准</span></td>
+      <td>与 Cypress 一致,在 CDP 上下文中正确执行</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Shadow DOM 可视化覆盖层</td>
+      <td><span class="badge standard">标准</span></td>
+      <td>扩展 overlay 的最佳实践</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>CDP 合成输入 (isTrusted=true)</td>
+      <td><span class="badge standard">标准</span></td>
+      <td>与 Playwright/Puppeteer 底层同款</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Thinking-aware tool loop 检测</td>
+      <td><span class="badge novel">微信桥创新</span></td>
+      <td>社区常见 tool loop 检测只看文本输出,我们加入 thinking_tokens 信号避免误杀 reasoning 模型</td>
+    </tr>
+  </table>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§11</span>与已知项目的对齐矩阵</h2>
+
+  <table class="compare">
+    <tr><th>对比维度</th><th>我们</th><th>Chrome DevTools MCP<br>(Google 官方)</th><th>QoderWork Browser Connector</th><th>Playwright MCP</th></tr>
+    <tr>
+      <td>传输</td>
+      <td>MCP stdio + 内部 WebSocket</td>
+      <td>MCP stdio + CDP WebSocket</td>
+      <td>MCP stdio + WebSocket → Extension</td>
+      <td>MCP stdio → Playwright server</td>
+    </tr>
+    <tr>
+      <td>浏览器</td>
+      <td>用户自己的 Edge/Chrome (Extension)</td>
+      <td>用户自己的 Chrome (--remote-debugging-port)</td>
+      <td>用户自己的 Chrome/Edge (Extension)</td>
+      <td>Playwright 管理的独立 browser</td>
+    </tr>
+    <tr>
+      <td>反爬</td>
+      <td class="win">真实指纹 + CDP 合成输入</td>
+      <td class="win">真实指纹 + CDP 合成输入</td>
+      <td class="win">真实指纹 + CDP 合成输入</td>
+      <td class="lose">独立 profile,无登录态</td>
+    </tr>
+    <tr>
+      <td>多 session</td>
+      <td class="win">Client-fallback + id 路由</td>
+      <td class="same">依赖 Chrome 自身多客户端</td>
+      <td class="same">单客户端</td>
+      <td class="same">独立 browser context</td>
+    </tr>
+    <tr>
+      <td>合盖可用</td>
+      <td class="win">✅ 双轨保活</td>
+      <td class="same">✅ Chrome 后台运行</td>
+      <td class="same">✅</td>
+      <td>❌ 需屏幕开着</td>
+    </tr>
+    <tr>
+      <td>部署复杂度</td>
+      <td>Extension 加载 + MCP 配置</td>
+      <td>Chrome 启动参数 + MCP 配置</td>
+      <td>Extension + Native Messaging</td>
+      <td><code>npx @playwright/mcp</code></td>
+    </tr>
+  </table>
+</section>
+
+<!-- =================================================================== -->
+<section>
+  <h2><span class="num">§12</span>现实与行业实践</h2>
+
+  <div class="verdict g">
+    <strong>合成输入避免检测</strong> —— 使用 CDP 的 <code>Input.dispatchMouseEvent</code> 和 <code>Input.insertText</code> 产生 <code>isTrusted=true</code> 的事件，与 <strong>Playwright</strong>、<strong>Puppeteer</strong>、<strong>QoderWork</strong> 的底层实现一致。小红书、知乎、B站均未触发验证码。
+  </div>
+
+  <div class="verdict g" style="margin-top:14px">
+    <strong>MV3 扩展 + Service Worker</strong> —— 遵循 Chrome 最新的扩展规范，<code>chrome.debugger</code> API 是拿到 CDP 控制权的标准方式。双轨保活解决了 SW 30s 回收的工程挑战。
+  </div>
+
+  <div class="verdict g" style="margin-top:14px">
+    <strong>MCP stdio transport</strong> —— 遵循 Anthropic 的参考架构。工具注册用的 JSON Schema 格式与 Chrome DevTools MCP 等官方项目一致。
+  </div>
+
+  <div class="verdict b" style="margin-top:14px">
+    <strong>未来演进方向</strong> —— 目前通过 WebSocket 内部桥接，而非纯 MCP stdio。如果要开源或标准化，可以考虑去掉 WebSocket 中间层，让 Extension 直接暴露 MCP 协议的 HTTP endpoint (MCP Streamable HTTP transport)，简化部署。
+  </div>
+</section>
+
+</div>
+
+<div class="footer">
+  菠萝丁 (Owen) · Dublin · July 2026
+</div>
+
+</body>
+</html>

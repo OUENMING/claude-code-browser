@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>让 Claude Code 走进浏览器和微信 — 一个项目的故事</title>
+<style>
+  :root {
+    --bg: #0a0908; --card: #141210; --border: rgba(200,168,124,.12);
+    --text: #e8ddd0; --muted: #8a8074; --accent: #c8a87c; --green: #4ade80;
+    --red: #f87171; --blue: #60a5fa; --purple: #c084fc; --orange: #fb923c;
+  }
+  * { box-sizing:border-box;margin:0;padding:0 }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text);line-height:1.8; }
+  ::selection { background:rgba(200,168,124,.25);color:var(--text) }
+
+  /* Hero */
+  .hero { text-align:center;padding:120px 24px 80px;position:relative;overflow:hidden }
+  .hero::before { content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle at center,rgba(200,168,124,.06),transparent 60%);pointer-events:none }
+  .hero h1 { font-size:clamp(28px,5vw,52px);font-weight:700;letter-spacing:-0.01em;line-height:1.3 }
+  .hero h1 em { font-style:normal;color:var(--accent) }
+  .hero .subtitle { color:var(--muted);font-size:17px;margin-top:20px;max-width:580px;margin-inline:auto }
+  .hero .meta { margin-top:32px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap }
+  .hero .tag { padding:6px 16px;border-radius:20px;font-size:13px;font-weight:500;border:1px solid var(--border) }
+  .hero .tag.g { border-color:rgba(74,222,128,.2);color:var(--green) }
+  .hero .tag.b { border-color:rgba(96,165,250,.2);color:var(--blue) }
+
+  .container { max-width:880px;margin:0 auto;padding:0 24px }
+  .spacer { height:80px }
+
+  /* Chapters */
+  .chapter { margin:80px 0 }
+  .chapter-num { font-size:13px;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px }
+  .chapter h2 { font-size:clamp(24px,4vw,36px);font-weight:700;line-height:1.25;margin-bottom:16px }
+  .chapter .lede { color:var(--muted);font-size:16px;margin-bottom:28px;max-width:600px }
+
+  /* Timeline dot */
+  .tl-item { position:relative;padding:28px 0 28px 36px;border-left:2px solid var(--border) }
+  .tl-item::before { content:'';position:absolute;left:-7px;top:34px;width:12px;height:12px;border-radius:50%;background:var(--accent) }
+  .tl-item:last-child { border-left-color:transparent }
+  .tl-date { font-size:12px;color:var(--muted);margin-bottom:4px;letter-spacing:.03em }
+  .tl-item h3 { font-size:18px;font-weight:600;margin-bottom:6px }
+  .tl-item p { color:var(--muted);font-size:14px;max-width:600px }
+
+  /* Analogy cards */
+  .analogy { background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;margin:28px 0;position:relative }
+  .analogy .icon { font-size:28px;margin-bottom:12px }
+  .analogy h4 { font-size:16px;color:var(--accent);margin-bottom:8px }
+  .analogy p { font-size:14px;color:var(--muted);line-height:1.7 }
+
+  /* Architecture diagram */
+  .arch { background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px 32px;margin:32px 0;overflow-x:auto }
+  .arch .flow { display:flex;align-items:center;justify-content:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:13px;flex-wrap:wrap;min-width:min-content }
+  .arch .node { background:rgba(200,168,124,.06);border:1px solid var(--border);border-radius:10px;padding:14px 18px;white-space:nowrap;text-align:center }
+  .arch .node.hl { border-color:var(--accent);color:var(--accent);font-weight:600 }
+  .arch .arrow { color:var(--muted);font-size:16px;font-weight:600 }
+  .arch .label { font-size:11px;color:var(--muted);text-align:center;margin-top:14px }
+
+  /* Bug story */
+  .bug { background:var(--card);border-left:3px solid var(--red);border-radius:0 12px 12px 0;padding:24px 28px;margin:24px 0 }
+  .bug h4 { font-size:15px;color:var(--red);margin-bottom:4px }
+  .bug .scene { font-size:14px;color:var(--muted);margin-bottom:12px }
+  .bug .fix { font-size:14px;color:var(--green) }
+
+  /* Stats row */
+  .stats { display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin:32px 0 }
+  .stat { background:var(--card);border:1px solid var(--border);border-radius:12px;padding:22px;text-align:center }
+  .stat .num { font-size:30px;font-weight:700;color:var(--accent) }
+  .stat .label { font-size:12px;color:var(--muted);margin-top:4px }
+
+  /* Callout */
+  .callout { margin:24px 0;padding:20px 24px;border-radius:10px;font-size:14px }
+  .callout.info { background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.15) }
+  .callout.warn { background:rgba(251,146,60,.06);border:1px solid rgba(251,146,60,.12) }
+
+  /* Footer */
+  .footer { text-align:center;padding:80px 24px 60px;color:var(--muted);font-size:13px;border-top:1px solid var(--border);margin-top:80px }
+
+  @media (max-width:600px) {
+    .hero { padding:80px 20px 50px }
+    .arch .flow { font-size:11px;gap:6px }
+    .arch .node { padding:10px 14px }
+    .tl-item { padding-left:24px }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>一个 19 岁学生,<br>如何让 AI <em>走进浏览器和微信</em></h1>
+  <div class="subtitle">
+    从第一条 "你好" 到 AI 能帮你刷小红书、回微信、搜网页 —— 六个月,四个大版本,一条完整的链路。
+  </div>
+  <div class="meta">
+    <span class="tag g">Chrome Extension</span>
+    <span class="tag b">WeChat Bridge</span>
+    <span class="tag g">12 Browser Tools</span>
+    <span class="tag b">4 Search Engines</span>
+    <span class="tag g">0 行 Python</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">第一章 · 2026 年 6 月初</div>
+    <h2>在微信里和 Claude Code 聊天</h2>
+    <div class="lede">
+      一切的起点很简单：能不能在微信里直接和 AI 对话,就像和朋友聊天一样？
+    </div>
+
+    <div class="analogy">
+      <div class="icon">📱</div>
+      <h4>打个比方</h4>
+      <p>
+        想象一下：你的笔记本电脑里住着一个超级聪明的 AI 助手。但你想在手机上、在微信里跟它说话。
+        于是你给它装了一个"对讲机"——这个对讲机能接收你微信发来的文字,转发给 AI,
+        再把 AI 的回答传回微信。这个对讲机,就是我们项目的第一块砖。
+      </p>
+    </div>
+
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-date">2026 年 6 月</div>
+        <h3>微信桥 v1 — 对讲机搭好了</h3>
+        <p>
+          一个叫 <span style="color:var(--accent);font-family:'JetBrains Mono',monospace">wechat-claude-code</span> 的程序,通过 macOS 的
+          <span style="color:var(--blue)">launchd</span>（macOS 的后台管家）24 小时运行。
+          你在微信发消息 → 它收到 → 转给 Claude Code → 把回答发回微信。支持图片识别、实时打字提示、14 个快捷命令。
+        </p>
+      </div>
+    </div>
+
+    <div class="arch">
+      <div class="flow">
+        <div class="node">📱 微信消息</div><div class="arrow">→</div>
+        <div class="node hl">WeChat Bridge</div><div class="arrow">→</div>
+        <div class="node">Claude Code</div><div class="arrow">→</div>
+        <div class="node">📱 微信回复</div>
+      </div>
+      <div class="label">第一代架构：微信 ⇄ Claude Code 双向通道</div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">第二章 · 2026 年 6 月下旬</div>
+    <h2>给 AI 装上"手"——控制整个电脑</h2>
+    <div class="lede">
+      光会聊天不够。AI 能不能帮你点按钮、填表格、操控浏览器？
+    </div>
+
+    <div class="analogy">
+      <div class="icon">🖱️</div>
+      <h4>打个比方</h4>
+      <p>
+        之前的 AI 只能"说话"。现在我们给它装了一套"机械臂"：能看见屏幕上的按钮在哪（<span style="color:var(--blue)">视觉识别</span>）、
+        能精准点击（<span style="color:var(--blue)">鼠标模拟</span>）、能敲键盘输入文字（<span style="color:var(--blue)">键盘模拟</span>）。
+        这套机械臂叫 <span style="color:var(--accent)">mac-control</span>,有 143 种不同的操作姿势。
+      </p>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="num">143</div><div class="label">mac-control 工具</div></div>
+      <div class="stat"><div class="num">3</div><div class="label">控制层级</div></div>
+    </div>
+
+    <div class="arch">
+      <div class="flow">
+        <div class="node">🧠 Claude Code</div><div class="arrow">→</div>
+        <div class="node hl">AX Tree<br><span style="font-size:10px;color:var(--muted)">原生应用</span></div>
+        <div class="node hl">CDP<br><span style="font-size:10px;color:var(--muted)">浏览器</span></div>
+        <div class="node hl">Vision<br><span style="font-size:10px;color:var(--muted)">截图+OCR</span></div>
+        <div class="arrow">→</div>
+        <div class="node">🖥️ 真实桌面</div>
+      </div>
+      <div class="label">mac-control 三层自动化架构</div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">第三章 · 2026 年 7 月初</div>
+    <h2>不好的声音 — 幻觉与"装死"</h2>
+    <div class="lede">
+      你觉得它会唱歌,它却在那疯狂按同一首歌放不出声。
+    </div>
+
+    <div class="bug">
+      <h4>Bug 1 — 用户收到"🤔 思考中... 🔧 正在执行: Bash"</h4>
+      <div class="scene">
+        微信里朋友问了个问题,等了几秒,收到一长串奇怪的系统消息混在回答里。
+        想象你给朋友发"今天天气怎么样",他回你"我正在脑子里想...我正在查资料...我正在打字...晴天"。前面的"脑子里想"根本不是他该说出来的。
+      </div>
+      <div class="fix">
+        修复：AI 的"内心独白"和"对外说话"走的是两条通道。之前桥接程序把两条通道混在一起了。
+        找到那条内部通道,在上面贴个封条：<span style="color:var(--green)">内部消息,禁止转发</span>。
+      </div>
+    </div>
+
+    <div class="bug">
+      <h4>Bug 2 — 模型换了,幻觉大爆发</h4>
+      <div class="scene">
+        2026 年 7 月 5 日,后台的 AI 模型被自动切换了——从 DeepSeek V4 Pro 换成了 MiMo v2.5。
+        就像你习惯了一个助理的风格,突然换了个新人,他说话靠谱度直线下降。不是编程的问题,是"换人"了。
+      </div>
+      <div class="fix">
+        修复：不是修代码,是修配置。确认模型映射（fable → MiMo v2.5）,调整 system prompt（给新助理写更详细的"工作守则"）。
+      </div>
+    </div>
+
+    <div class="bug">
+      <h4>Bug 3 — 卡在 Bash 循环里,微信"装死"</h4>
+      <div class="scene">
+        朋友在微信里问"帮我找一下那个文件",等了 2 分钟,什么也没收到。
+        AI 其实在后台疯狂地敲同一个命令——一次、两次、三次……第八次的时候,桥接程序判定"这人在发疯",一刀切断。
+        但刀法不对——AI 在工具调用之间确实在思考（就像人做一步看一步）,只是思考内容没通过"对外通道"发出来。
+        桥接程序只看"对外通道"有没有东西,没东西就杀。
+      </div>
+      <div class="fix">
+        修复：不止看"对外通道",也监听"思考通道"。思考之间不算死循环。阈值从 8 次放宽到 15 次。
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">第四章 · 2026 年 7 月 15 日</div>
+    <h2>终极形态：AI 能"看见"浏览器了</h2>
+    <div class="lede">
+      之前 AI 是通过截屏和鼠标点击来操控浏览器——相当于"蒙着眼睛摸"。现在,它终于有了"眼睛"。
+    </div>
+
+    <div class="analogy">
+      <div class="icon">🔍</div>
+      <h4>打个比方 — 盲人摸象 vs 透视眼</h4>
+      <p>
+        <strong>旧方法（Vision）：</strong>AI 截一张浏览器的图,对着图片猜"这里有个按钮,那里有个输入框"。
+        就像蒙着眼摸大象——能摸到,但不能保证每次都摸对。<br><br>
+        <strong>新方法（CDP）：</strong>AI 直接"看到"网页的内部结构——每个按钮叫什么名字、是什么类型、
+        当前是什么状态。就像大象自己会说话,告诉你"我是鼻子,我是腿,我是耳朵"。
+        这种方式叫 <span style="color:var(--blue)">CDP（Chrome DevTools Protocol）</span>,是 Chrome 浏览器自带的"遥控器接口"。
+      </p>
+    </div>
+
+    <div class="arch">
+      <div class="flow">
+        <div class="node hl">🧠 Claude Code<br><span style="font-size:10px;color:var(--muted)">终端·微信</span></div>
+        <div class="arrow">→</div>
+        <div class="node">MCP Server<br><span style="font-size:10px;color:var(--muted)">stdio</span></div>
+        <div class="arrow">→</div>
+        <div class="node hl">WebSocket<br><span style="font-size:10px;color:var(--accent)">端口 19222</span></div>
+        <div class="arrow">→</div>
+        <div class="node">Edge Extension<br><span style="font-size:10px;color:var(--muted)">后台常驻</span></div>
+        <div class="arrow">→</div>
+        <div class="node hl">🌐 真实浏览器</div>
+      </div>
+      <div class="label">最终架构：Claude Code → WebSocket → Chrome Extension → 真实浏览器</div>
+    </div>
+
+    <div class="callout info">
+      <strong style="color:var(--blue)">技术小课堂 — WebSocket 是什么？</strong><br>
+      想象你和朋友打电话。HTTP 就像对讲机——你说一句,他回一句,然后就挂了。
+      WebSocket 就像手机通话——拨通后两人可以同时说、同时听,不用反复拨号。
+      Claude Code 和浏览器之间就是这样一条"热线",一直通着,随时可以发指令、收结果。
+    </div>
+
+    <div class="callout info" style="margin-top:18px">
+      <strong style="color:var(--blue)">技术小课堂 — MCP 是什么？</strong><br>
+      MCP（Model Context Protocol）是 Anthropic 发明的"AI 工具插头标准",就像 USB-C 是手机的充电插头标准。
+      以前每家 AI 公司都有自己的工具接口,就像每家手机公司有不同的充电口。
+      有了 MCP,所有 AI 都能用同一套工具——就像所有手机都能用 USB-C 充电。
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="num">12</div><div class="label">浏览器工具</div></div>
+      <div class="stat"><div class="num">1,522</div><div class="label">总代码行数</div></div>
+      <div class="stat"><div class="num">4</div><div class="label">共享 MCP</div></div>
+      <div class="stat"><div class="num">19222</div><div class="label">WebSocket 端口</div></div>
+      <div class="stat"><div class="num">30s</div><div class="label">工具超时</div></div>
+      <div class="stat"><div class="num">3</div><div class="label">搜素引擎</div></div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">第五章 · 难题</div>
+    <h2>两个"AI 分身"怎么共享一个浏览器？</h2>
+    <div class="lede">
+      终端里有一个 Claude Code 在跑,微信里也有一个 Claude Code 在跑。它们都想用浏览器的 12 个工具。
+      但浏览器只开了一个窗口,谁先用谁就先占住——后来者直接被踢出去。
+    </div>
+
+    <div class="analogy">
+      <div class="icon">🏢</div>
+      <h4>打个比方 — 同一个办公室,两个前台</h4>
+      <p>
+        浏览器就像一栋大楼,只有一个大门（端口 19222）。保安室外面有两个前台（两个 Claude Code 实例）,
+        都想从大门进去办事。第一个人到了,占住大门;第二个人到了,发现大门被占,直接走了——<strong>微信端的 AI 就用不了浏览器了</strong>。
+      </p>
+    </div>
+
+    <div class="bug">
+      <h4>Bug 4 — EADDRINUSE："大门被占,我走了"</h4>
+      <div class="scene">
+        这是今天刚修好的最后一个大 bug。微信端的 AI 子进程尝试用浏览器,发现 19222 端口已经被终端 AI 占了,
+        旧代码直接把进程崩了——微信端用户收到的是"浏览器扩展未连接"的错,看起来像是扩展坏了,
+        实际上只是"已经有另一个人在用了"。
+      </div>
+      <div class="fix">
+        修复：不是"大门被占我走",而是"大门被占我等一下,或者从侧门进去"。
+        新代码加了两个机制：① <span style="color:var(--green)">退避重试</span>——等 1 秒再试,总共试 3 次;
+        ② <span style="color:var(--green)">client 模式</span>——如果大门一直被占,就以"访客"身份从侧门进去,
+        通过第一个人的前台转发消息。两个 AI 分身都能用浏览器,互不冲突。
+      </div>
+    </div>
+
+    <div class="arch">
+      <div class="flow">
+        <div class="node">🧠 终端 Claude<br><span style="font-size:9px;color:var(--green)">主 session</span></div>
+        <div class="arrow">↘</div>
+        <div class="node hl" style="border:2px solid var(--accent)">🏢 19222<br><span style="font-size:9px;color:var(--accent)">消息路由</span></div>
+        <div class="arrow">→</div>
+        <div class="node">🌐 Edge 扩展</div>
+        <div class="arrow" style="transform:rotate(180deg)">↙</div>
+        <div class="node">🧠 微信 Claude<br><span style="font-size:9px;color:var(--blue)">子 session</span></div>
+      </div>
+      <div class="label">最终架构：双 AI 共享一个浏览器,通过 19222 消息路由器中转</div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">第六章</div>
+    <h2>现在能做什么？</h2>
+
+    <div class="callout info">
+      <strong>🎯 在微信里</strong><br>
+      发消息给 Claude Code → 它能帮你搜网页、读文章、打开浏览器看小红书知乎、
+      填表单、截图分析、查天气……就像有一个超级助理随时在线。
+    </div>
+
+    <div class="callout info" style="margin-top:14px">
+      <strong>🎯 在终端里</strong><br>
+      同样的 12 个浏览器工具 + 4 个搜索 MCP 全都在。两边完全一样,随时切换。
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">附录</div>
+    <h2>技术全景</h2>
+
+    <div class="stats">
+      <div class="stat"><div class="num">6</div><div class="label">大版本迭代</div></div>
+      <div class="stat"><div class="num">5</div><div class="label">主要 Bug</div></div>
+      <div class="stat"><div class="num">4</div><div class="label">MCP 服务器</div></div>
+      <div class="stat"><div class="num">2</div><div class="label">Claude Code 实例</div></div>
+      <div class="stat"><div class="num">1</div><div class="label">消息路由器</div></div>
+      <div class="stat"><div class="num">0</div><div class="label">付费 API</div></div>
+    </div>
+
+    <div class="arch" style="margin-top:28px">
+      <div style="font-size:14px;color:var(--muted);margin-bottom:20px;text-align:center">完整架构图</div>
+      <div class="flow" style="flex-direction:column;gap:8px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center">
+          <div class="node">📱 微信</div><div class="arrow">⇄</div>
+          <div class="node">WeChat Bridge<br><span style="font-size:9px;color:var(--muted)">launchd 守护</span></div><div class="arrow">→</div>
+          <div class="node hl">Claude Code<br><span style="font-size:9px;color:var(--accent)">微信子进程</span></div>
+        </div>
+        <div style="text-align:center;color:var(--muted);font-size:13px">+</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center">
+          <div class="node hl">Claude Code<br><span style="font-size:9px;color:var(--accent)">终端主进程</span></div>
+        </div>
+        <div style="text-align:center;color:var(--muted);font-size:13px">↓↓</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center">
+          <div class="node hl" style="border:2px solid var(--accent)">🏢 消息路由器<br><span style="font-size:9px;color:var(--green)">19222</span></div><div class="arrow">↔</div>
+          <div class="node">🌐 Edge Extension<br><span style="font-size:9px;color:var(--muted)">MV3</span></div><div class="arrow">↔</div>
+          <div class="node">Microsoft Edge<br><span style="font-size:9px;color:var(--muted)">CDP v1.3</span></div>
+        </div>
+        <div style="text-align:center;color:var(--muted);font-size:13px">MCP 工具层</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center">
+          <span style="background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;font-family:'JetBrains Mono',monospace">gemini-webapi</span>
+          <span style="background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;font-family:'JetBrains Mono',monospace">browser</span>
+          <span style="background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;font-family:'JetBrains Mono',monospace">searxng</span>
+          <span style="background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;font-family:'JetBrains Mono',monospace">web-search</span>
+          <span style="background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;font-family:'JetBrains Mono',monospace">mac-control</span>
+          <span style="background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;font-family:'JetBrains Mono',monospace">mcp-vision</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+  <!-- ================================================================= -->
+  <div class="chapter">
+    <div class="chapter-num">专题</div>
+    <h2>浏览器 MCP 深度解析</h2>
+    <div class="lede">
+      这是整个项目最复杂的模块。下面拆开来看每个零件是怎么工作的。
+    </div>
+
+    <h3 style="color:var(--accent);margin:36px 0 16px;font-size:20px">12 个工具 = 浏览器的 12 种"超能力"</h3>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin:20px 0">
+      <div class="bug" style="border-left-color:var(--blue)">
+        <h4 style="color:var(--blue)">navigate — 跳转</h4>
+        <div class="scene">打开任何网页,支持 "back"/"forward" 前进后退。就像你在地址栏输入 URL 一样。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--blue)">
+        <h4 style="color:var(--blue)">read_page — 看结构</h4>
+        <div class="scene">把网页上所有可交互元素（按钮、输入框、链接）列成一个清单,每个带编号 [ref_1], [ref_2]...</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--blue)">
+        <h4 style="color:var(--blue)">find — 搜元素</h4>
+        <div class="scene">按关键词搜索页面上的按钮/输入框,返回匹配的 ref 编号列表。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--green)">
+        <h4 style="color:var(--green)">computer — 万能遥控器</h4>
+        <div class="scene">13 种动作:left_click, right_click, double_click, type, screenshot, wait, scroll, key, hover, zoom……</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--green)">
+        <h4 style="color:var(--green)">form_input — 填表</h4>
+        <div class="scene">用 ref 编号精准填写表单字段。React/Vue 的"受控组件"也能搞定（用原型 setter 注入）。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--purple)">
+        <h4 style="color:var(--purple)">get_page_text — 纯文本</h4>
+        <div class="scene">把整个网页的文字全部提取出来。适合社交媒体——小红书、知乎、B 站。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--purple)">
+        <h4 style="color:var(--purple)">get_page_markdown — 结构化</h4>
+        <div class="scene">把网页转成 Markdown 格式(保留标题、链接、表格、代码块)。适合博客、技术文档。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--orange)">
+        <h4 style="color:var(--orange)">javascript_tool — 执行 JS</h4>
+        <div class="scene">在页面里跑一段 JavaScript,三次尝试:scripting → CDP 同步 → CDP async。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--orange)">
+        <h4 style="color:var(--orange)">read_console_messages — 看控制台</h4>
+        <div class="scene">读取浏览器控制台的日志和错误,支持错误过滤和内容搜索。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--orange)">
+        <h4 style="color:var(--orange)">read_network_requests — 看网络</h4>
+        <div class="scene">读取网页发出去的所有 HTTP 请求,支持 URL 正则过滤。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--muted)">
+        <h4>tabs_context — 列出标签页</h4>
+        <div class="scene">列出浏览器所有打开的标签页,标明哪个是当前活跃的。</div>
+      </div>
+      <div class="bug" style="border-left-color:var(--muted)">
+        <h4>tabs_create — 新建标签页</h4>
+        <div class="scene">创建一个空白标签页。</div>
+      </div>
+    </div>
+
+    <h3 style="color:var(--accent);margin:48px 0 16px;font-size:20px">四个"小精灵"——Content Scripts</h3>
+    <div class="lede">
+      浏览器扩展里有四个看不见的脚本,每个负责一种感知方式。它们在你打开任何网页时自动注入,像四只小精灵趴在页面上干活。
+    </div>
+
+    <div class="analogy">
+      <div class="icon">👁️</div>
+      <h4>accessibility-tree.js — "结构眼"（140行）</h4>
+      <p>
+        读取网页的无障碍标签（ARIA）。每个按钮、输入框、链接都有标签——"搜索","提交","关闭"。
+        这个脚本把它们按编号列出来: <span style="font-family:'JetBrains Mono',monospace;color:var(--accent)">[ref_48] textbox "搜索小红书"</span>。
+        用 <span style="color:var(--blue)">WeakRef</span>（弱引用）存元素——不会阻止浏览器回收内存,也不会造成"内存泄漏"。
+      </p>
+    </div>
+
+    <div class="analogy">
+      <div class="icon">⌨️</div>
+      <h4>page-bridge.js — "填表手"（113行）</h4>
+      <p>
+        专门对付表单。普通网站用 <span style="font-family:'JetBrains Mono',monospace;color:var(--accent)">input.value = "张三"</span> 就行。
+        React/Vue 写的网站<strong>不吃这一套</strong>——它们有自己的"内部状态管理",直接改 value 会被覆盖。
+        解决方法:<strong>原型 setter 劫持</strong>——在 React 的 value setter 上动手脚,让它以为用户真的在键盘上敲了。
+      </p>
+    </div>
+
+    <div class="analogy">
+      <div class="icon">📝</div>
+      <h4>auto-capture.js — "转译器"（121行）</h4>
+      <p>
+        把 HTML 转成 Markdown:标题变 #,链接保留,表格还原,代码块变 ```。
+        有一个特殊技能——<strong>懒加载图片检测</strong>。很多网站的图片是"滚到了才加载"（lazy load）,
+        它能识别"图片标签有了但图片还没下载"(el.complete && naturalWidth),跳过空图片,不产出破碎链接。
+      </p>
+    </div>
+
+    <div class="analogy">
+      <div class="icon">✨</div>
+      <h4>visual-indicator.js — "信号灯"（189行）</h4>
+      <p>
+        用 <span style="color:var(--blue)">Shadow DOM</span>（影子 DOM——不受网页 CSS 影响的独立空间）在页面上画:
+        绿色脉冲边框(标记被点击的元素)、右上角状态徽章、底部"停止"按钮。
+        一切都是独立渲染的,不会和网页原本的样式发生冲突。
+      </p>
+    </div>
+
+    <h3 style="color:var(--accent);margin:48px 0 16px;font-size:20px">技术细节 — 怎么做到"不被检测"？</h3>
+
+    <div class="callout info">
+      <strong style="color:var(--accent)">人类节奏的输入模拟</strong><br>
+      每个 ASCII 字符:3 次 CDP 调用（keyDown → char → keyUp）+ 20ms 延迟。<br>
+      中文:逐字符 <span style="font-family:'JetBrains Mono',monospace">Input.insertText</span> + 10-30ms 随机延迟。<br>
+      点击:mouseMoved → 50ms → mousePressed → 50ms → mouseReleased。<br>
+      <br>
+      <span style="color:var(--muted)">为什么不是简单的 element.click()？因为小红书/B站/知乎会检测——</span><br>
+      <span style="color:var(--red)">element.click() 没有真实的鼠标坐标、没有按下的时间间隔 → 反爬系统一眼看出来是脚本。</span><br>
+      <span style="color:var(--green)">CDP 事件走的是浏览器内核的输入管线,和真人的鼠标/键盘事件完全一样。</span>
+    </div>
+
+    <div class="callout info" style="margin-top:18px">
+      <strong style="color:var(--accent)">聪明的截图</strong><br>
+      不对 4K 屏幕直接截——那样一张图好几 MB,传输慢还卡。<br>
+      先 <span style="font-family:'JetBrains Mono',monospace">Emulation.setDeviceMetricsOverride</span> 把视口缩到 1280px 宽,再截。
+      三级画质:low(20%,最大 27KB) / medium(40%,270KB) / high(60%,670KB)。<br>
+      之前的质量降级循环(quality 从 80→75→70→...逐 5 递减,最多 4 次 CDP 调用)被替换成了单次高质量截图。
+    </div>
+
+    <div class="callout info" style="margin-top:18px">
+      <strong style="color:var(--accent)">双轨保活 — 保证后台不睡</strong><br>
+      Chrome Extension 的 Service Worker 30 秒没消息就会被系统回收。<br>
+      保活策略:<br>
+      ① <span style="font-family:'JetBrains Mono',monospace">setInterval</span> 每 25 秒写一次 storage<br>
+      ② <span style="font-family:'JetBrains Mono',monospace">chrome.alarms</span> 每 0.5 分钟发一次唤醒信号<br>
+      双轨互补——setInterval 被暂停时,alarms 能救回来;alarms 延迟时,setInterval 顶着。
+      这就是为什么<strong>合盖+插电也能正常运行</strong>（电脑不睡,扩展不休）。
+    </div>
+
+    <div class="callout info" style="margin-top:18px">
+      <strong style="color:var(--accent)">FIFO 命令队列</strong><br>
+      所有浏览器操作必须串行——同时点击两个按钮会把浏览器搞糊涂。<br>
+      用先进先出队列:第一个操作完成 → 第二个操作才开始。<br>
+      30 秒超时,超时自动放弃。有个"停止"按钮可以清空整个队列。
+    </div>
+
+    <h3 style="color:var(--accent);margin:48px 0 16px;font-size:20px">性能瓶颈（已知,待优化）</h3>
+
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin:20px 0">
+      <tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted)">瓶颈</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted)">根因</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted)">提速潜力</th>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(200,168,124,.05)">
+        <td style="padding:8px 12px">逐字符输入</td>
+        <td style="padding:8px 12px;color:var(--muted)">ASCII 3 次 CDP/字符+20ms;中文 insertText 逐字</td>
+        <td style="padding:8px 12px;color:var(--green)">合并 insertText → 10×</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(200,168,124,.05)">
+        <td style="padding:8px 12px">截图降级循环</td>
+        <td style="padding:8px 12px;color:var(--muted)">4K 屏 quality 逐减最多 4 次 CDP</td>
+        <td style="padding:8px 12px;color:var(--green)">二分法 → 2×</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(200,168,124,.05)">
+        <td style="padding:8px 12px">Content Script 注入</td>
+        <td style="padding:8px 12px;color:var(--muted)">4 个文件分 4 次 executeScript</td>
+        <td style="padding:8px 12px;color:var(--green)">合并注入 → 2×</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(200,168,124,.05)">
+        <td style="padding:8px 12px">waitForLoad 轮询</td>
+        <td style="padding:8px 12px;color:var(--muted)">每 100ms 检查 chrome.tabs.get</td>
+        <td style="padding:8px 12px;color:var(--green)">改事件监听 → 即时</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px">FIFO 单线程</td>
+        <td style="padding:8px 12px;color:var(--muted)">同一 tab 必须串行,某工具卡住全队列堵</td>
+        <td style="padding:8px 12px;color:var(--green)">分 tab 并行 → N×</td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+
+<div class="footer">
+  Built in Dublin 🇮🇪 · July 2026 · 菠萝丁 (Owen) · UCD Engineering 2025-2029
+</div>
+
+</body>
+</html>

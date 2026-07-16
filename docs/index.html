@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude Code 浏览器自动化</title>
+<style>
+  :root {
+    --bg: #0c0a08; --card: #141210; --border: rgba(200,168,124,.1);
+    --text: #e8ddd0; --muted: #8a8074; --accent: #c8a87c; --green: #4ade80;
+    --red: #f87171; --blue: #60a5fa; --purple: #c084fc;
+  }
+  * { box-sizing:border-box;margin:0;padding:0 }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.7 }
+  .hero { text-align:center;padding:80px 20px 60px;position:relative;overflow:hidden }
+  .hero::before { content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(200,168,124,.08),transparent 70%);pointer-events:none }
+  .hero h1 { font-size:clamp(32px,5vw,56px);font-weight:700;letter-spacing:-0.02em }
+  .hero h1 span { color:var(--accent) }
+  .hero p { color:var(--muted);font-size:18px;margin-top:16px;max-width:600px;margin-inline:auto }
+  .badge { display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;margin:20px 8px 0 }
+  .badge.green { background:rgba(74,222,128,.12);color:var(--green) }
+  .badge.blue { background:rgba(96,165,250,.12);color:var(--blue) }
+  .container { max-width:1100px;margin:0 auto;padding:0 24px }
+  section { margin:60px 0 }
+
+  .arch { background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:14px }
+  .arch .flow { display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;margin:20px 0 }
+  .arch .node { background:rgba(200,168,124,.08);border:1px solid var(--border);border-radius:10px;padding:14px 20px;white-space:nowrap }
+  .arch .node.highlight { border-color:var(--accent);color:var(--accent);font-weight:600 }
+  .arch .arrow { color:var(--muted);font-size:20px }
+
+  .tools-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px }
+  .tool-card { background:var(--card);border:1px solid var(--border);border-radius:12px;padding:22px;transition:border-color .2s }
+  .tool-card:hover { border-color:var(--accent) }
+  .tool-card h3 { font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--accent);margin-bottom:6px }
+  .tool-card .desc { color:var(--muted);font-size:14px;margin-bottom:12px }
+  .tool-card .params { font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace }
+  .tool-card .params span { color:var(--blue) }
+
+  .flow-section { background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden }
+  .flow-section h3 { padding:16px 22px;font-size:15px;color:var(--accent);border-bottom:1px solid var(--border) }
+  .flow-section .step { padding:14px 22px;display:flex;gap:14px;align-items:flex-start;border-bottom:1px solid rgba(200,168,124,.05);font-size:14px }
+  .flow-section .step:last-child { border-bottom:none }
+  .step-num { min-width:28px;height:28px;border-radius:50%;background:rgba(200,168,124,.12);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600 }
+  .step .code { color:var(--green);font-family:'JetBrains Mono',monospace;font-size:13px }
+
+  .stats { display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px }
+  .stat { background:var(--card);border:1px solid var(--border);border-radius:12px;padding:22px;text-align:center }
+  .stat .num { font-size:32px;font-weight:700;color:var(--accent) }
+  .stat .label { color:var(--muted);font-size:13px;margin-top:4px }
+
+  .test-table { width:100%;border-collapse:collapse;font-size:14px }
+  .test-table th { text-align:left;padding:10px 16px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border) }
+  .test-table td { padding:10px 16px;border-bottom:1px solid rgba(200,168,124,.05) }
+  .test-table .pass { color:var(--green);font-weight:600 }
+  .test-table .warn { color:#fbbf24 }
+
+  .tip-box { background:rgba(200,168,124,.05);border-left:3px solid var(--accent);padding:16px 20px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px }
+
+  .code-block { background:rgba(0,0,0,.3);border-radius:8px;padding:20px;font-family:'JetBrains Mono',monospace;font-size:13px;overflow-x:auto;white-space:pre }
+  .code-block .cmt { color:var(--muted) }
+  .code-block .fn { color:var(--accent) }
+  .code-block .str { color:var(--green) }
+
+  .grid-2 { display:grid;grid-template-columns:1fr 1fr;gap:16px }
+  @media (max-width:700px) { .grid-2 { grid-template-columns:1fr } }
+
+  footer { text-align:center;padding:60px 20px;color:var(--muted);font-size:13px;border-top:1px solid var(--border);margin-top:60px }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Claude Code <span>浏览器自动化</span></h1>
+  <p>用自然语言操控真实浏览器——导航、点击、输入、截图、提取内容。真实指纹 + CDP 合成输入，绕过反爬检测。</p>
+  <div>
+    <span class="badge green">Chrome Extension MV3</span>
+    <span class="badge blue">MCP Server</span>
+    <span class="badge green">12 Tools</span>
+    <span class="badge blue">WebSocket</span>
+    <span class="badge green">CDP 合成输入</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- 架构 -->
+<section>
+  <div class="arch">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">数据流</div>
+    <div class="flow">
+      <div class="node highlight">Claude Code</div>
+      <div class="arrow">→</div>
+      <div class="node">MCP Server<br><span style="font-size:11px;color:var(--muted)">stdio</span></div>
+      <div class="arrow">→</div>
+      <div class="node highlight">WebSocket<br><span style="font-size:11px;color:var(--muted)">19222</span></div>
+      <div class="arrow">→</div>
+      <div class="node">Chrome Extension<br><span style="font-size:11px;color:var(--muted)">background.js</span></div>
+      <div class="arrow">→</div>
+      <div class="node highlight">真实浏览器<br><span style="font-size:11px;color:var(--muted)">Edge/Chrome</span></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted)">Extension 通过 chrome.debugger (CDP) 控制浏览器 · Content Scripts 注入 DOM · 元素定位用 ref，点击用 Input.dispatchMouseEvent</div>
+  </div>
+</section>
+
+<!-- 统计数据 -->
+<section>
+  <div class="stats">
+    <div class="stat"><div class="num">12</div><div class="label">MCP 工具</div></div>
+    <div class="stat"><div class="num">718</div><div class="label">background.js 行数</div></div>
+    <div class="stat"><div class="num">4</div><div class="label">Content Scripts</div></div>
+    <div class="stat"><div class="num">1522</div><div class="label">总代码行数</div></div>
+    <div class="stat"><div class="num">19222</div><div class="label">WebSocket 端口</div></div>
+    <div class="stat"><div class="num">30s</div><div class="label">工具超时</div></div>
+  </div>
+</section>
+
+<!-- 工具清单 -->
+<section>
+  <h2 style="font-size:22px;margin-bottom:20px">工具清单</h2>
+
+  <h3 style="color:var(--accent);font-size:15px;margin:24px 0 12px">🧭 导航</h3>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <h3>navigate</h3>
+      <div class="desc">导航到指定 URL，支持 "back"/"forward" 前进后退。</div>
+      <div class="params">必填: <span>url</span></div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--accent);font-size:15px;margin:24px 0 12px">📖 页面读取</h3>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <h3>read_page</h3>
+      <div class="desc">获取可访问性元素树，每个元素带 [ref_N] 标识符。filter="interactive" 仅交互元素（省 token），"all" 全部。</div>
+      <div class="params">可选: <span>filter</span> <span>max_chars</span> <span>ref_id</span> <span>tabId</span></div>
+    </div>
+    <div class="tool-card">
+      <h3>find</h3>
+      <div class="desc">按关键词搜索元素，匹配 text/aria-label/title/role。返回 ref 列表供 computer/form_input 使用。</div>
+      <div class="params">必填: <span>query</span> · 可选: <span>max_results</span></div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--accent);font-size:15px;margin:24px 0 12px">🖱 交互</h3>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <h3>computer</h3>
+      <div class="desc">鼠标/键盘/截图交互的核心工具。13 种 action：left_click, right_click, double_click, triple_click, type, screenshot, wait, scroll, scroll_to, key, left_click_drag, hover, zoom</div>
+      <div class="params">必填: <span>action</span> · 选填: <span>ref</span> <span>coordinate</span> <span>text</span> <span>quality</span> <span>modifiers</span></div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--accent);font-size:15px;margin:24px 0 12px">📝 表单</h3>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <h3>form_input</h3>
+      <div class="desc">用 ref 设置表单字段值。React/Vue 受控组件兼容（prototype setter）。select 用 option text，checkbox 用 boolean。</div>
+      <div class="params">必填: <span>ref</span> <span>value</span></div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--accent);font-size:15px;margin:24px 0 12px">📄 内容提取</h3>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <h3>get_page_text</h3>
+      <div class="desc">纯文本提取（textContent）。最完整，不丢内容。自动选 article/main 等语义容器。适合社交媒体、复杂 SPA。</div>
+      <div class="params">可选: <span>max_chars</span> (默认 50000)</div>
+    </div>
+    <div class="tool-card">
+      <h3>get_page_markdown</h3>
+      <div class="desc">结构化 Markdown 提取。保留标题(#)、链接、代码块、表格、图片。过滤 <50px 装饰图标。适合博客、文档、产品页。</div>
+      <div class="params">可选: <span>max_chars</span> (默认 50000)</div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--accent);font-size:15px;margin:24px 0 12px">🔧 JS & 调试 & 标签页</h3>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <h3>javascript_tool</h3>
+      <div class="desc">在当前页面执行 JavaScript。三种尝试策略：scripting → CDP 同步 → CDP async IIFE。</div>
+      <div class="params">必填: <span>text</span></div>
+    </div>
+    <div class="tool-card">
+      <h3>read_console_messages</h3>
+      <div class="desc">读取浏览器控制台消息，支持 onlyErrors/pattern 过滤、limit 截断、clear 清空。</div>
+      <div class="params">必填: <span>tabId</span> · 可选: <span>onlyErrors</span> <span>pattern</span> <span>clear</span> <span>limit</span></div>
+    </div>
+    <div class="tool-card">
+      <h3>read_network_requests</h3>
+      <div class="desc">读取 HTTP 网络请求，支持 urlPattern 正则过滤。</div>
+      <div class="params">必填: <span>tabId</span> · 可选: <span>urlPattern</span> <span>clear</span> <span>limit</span></div>
+    </div>
+    <div class="tool-card">
+      <h3>tabs_context</h3>
+      <div class="desc">列出所有打开的标签页（含 active 标记、URL、标题）。</div>
+    </div>
+    <div class="tool-card">
+      <h3>tabs_create</h3>
+      <div class="desc">创建新的空白标签页。</div>
+    </div>
+  </div>
+</section>
+
+<!-- 场景工作流 -->
+<section>
+  <h2 style="font-size:22px;margin-bottom:20px">典型场景</h2>
+
+  <div class="grid-2">
+    <div class="flow-section">
+      <h3>🔴 小红书搜索 + 帖子阅读</h3>
+      <div class="step"><span class="step-num">1</span><div><div class="code">navigate: "xiaohongshu.com"</div><span style="color:var(--muted);font-size:12px">打开首页</span></div></div>
+      <div class="step"><span class="step-num">2</span><div><div class="code">read_page({ filter: "interactive" })</div><span style="color:var(--muted);font-size:12px">找到搜索框 ref_48 textbox "搜索小红书"</span></div></div>
+      <div class="step"><span class="step-num">3</span><div><div class="code">computer: left_click ref_48</div><span style="color:var(--muted);font-size:12px">点击搜索框</span></div></div>
+      <div class="step"><span class="step-num">4</span><div><div class="code">computer: type "都柏林旅行\n"</div><span style="color:var(--muted);font-size:12px">逐字符输入中文 + 回车</span></div></div>
+      <div class="step"><span class="step-num">5</span><div><div class="code">read_page + left_click 帖子</div><span style="color:var(--muted);font-size:12px">找到搜索结果中的帖子卡片并点击</span></div></div>
+      <div class="step"><span class="step-num">6</span><div><div class="code">get_page_text({ max_chars: 5000 })</div><span style="color:var(--muted);font-size:12px">提取帖子全文</span></div></div>
+    </div>
+
+    <div class="flow-section">
+      <h3>💬 知乎浏览</h3>
+      <div class="step"><span class="step-num">1</span><div><div class="code">navigate: "zhihu.com"</div></div></div>
+      <div class="step"><span class="step-num">2</span><div><div class="code">get_page_text({ max_chars: 5000 })</div><span style="color:var(--muted);font-size:12px">提取首页推荐 Feed（含热榜）</span></div></div>
+      <div class="step"><span class="step-num">3</span><div><div class="code">read_page({ filter: "interactive" })</div><span style="color:var(--muted);font-size:12px">找到搜索框 [ref_13] combobox "马龙出征全锦赛"</span></div></div>
+      <div class="step"><span class="step-num">4</span><div><div class="code">computer: left_click ref_N</div><span style="color:var(--muted);font-size:12px">点击帖子进入详情</span></div></div>
+      <div class="step"><span class="step-num">5</span><div><div class="code">get_page_text + get_page_markdown</div><span style="color:var(--muted);font-size:12px">双提取互补</span></div></div>
+    </div>
+
+    <div class="flow-section">
+      <h3>📋 表单自动填写</h3>
+      <div class="step"><span class="step-num">1</span><div><div class="code">navigate: "example.com/form"</div></div></div>
+      <div class="step"><span class="step-num">2</span><div><div class="code">read_page({ filter: "interactive" })</div><span style="color:var(--muted);font-size:12px">列出所有表单字段及其 ref</span></div></div>
+      <div class="step"><span class="step-num">3</span><div><div class="code">form_input ref_2 "张三"</div><span style="color:var(--muted);font-size:12px">文本字段</span></div></div>
+      <div class="step"><span class="step-num">4</span><div><div class="code">form_input ref_6 true</div><span style="color:var(--muted);font-size:12px">radio/checkbox boolean</span></div></div>
+      <div class="step"><span class="step-num">5</span><div><div class="code">form_input ref_13 "留言内容"</div><span style="color:var(--muted);font-size:12px">textarea 文本区</span></div></div>
+      <div class="step"><span class="step-num">6</span><div><div class="code">computer: left_click ref_submit</div><span style="color:var(--muted);font-size:12px">提交</span></div></div>
+    </div>
+
+    <div class="flow-section">
+      <h3>📚 技术文档阅读</h3>
+      <div class="step"><span class="step-num">1</span><div><div class="code">navigate: "docs.example.com"</div></div></div>
+      <div class="step"><span class="step-num">2</span><div><div class="code">get_page_markdown()</div><span style="color:var(--muted);font-size:12px">保留 API 表格、代码块、链接</span></div></div>
+      <div class="step"><span class="step-num">3</span><div><div class="code">get_page_text()</div><span style="color:var(--muted);font-size:12px">Markdown 漏内容时纯文本补漏</span></div></div>
+      <div class="step"><span class="step-num">4</span><div><div class="code">javascript_tool: "document.title"</div><span style="color:var(--muted);font-size:12px">验证页面状态</span></div></div>
+      <div class="step"><span class="step-num">5</span><div><div class="code">read_console_messages({ onlyErrors: true })</div><span style="color:var(--muted);font-size:12px">检查 JS 错误</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 内容提取策略 -->
+<section>
+  <h2 style="font-size:22px;margin-bottom:20px">内容提取策略</h2>
+  <div class="tip-box">
+    <strong style="color:var(--accent)">决策树</strong><br>
+    <span style="font-size:14px">
+      博客/文档/产品页 → <span style="color:var(--green)">get_page_markdown</span> 优先<br>
+      社交媒体(小红书/B站/知乎) → <span style="color:var(--green)">get_page_text</span> 优先<br>
+      不熟悉的页面 → 两个都调：Markdown 看结构 → 纯文本补漏
+    </span>
+  </div>
+
+  <table class="test-table" style="margin-top:20px">
+    <tr><th>测试场景</th><th>工具</th><th>结果</th><th>说明</th></tr>
+    <tr><td>小红书首页</td><td>get_page_text</td><td class="pass">✓ 完整</td><td>含 SPA __INITIAL_STATE__ JSON 状态</td></tr>
+    <tr><td>小红书帖子卡片</td><td>read_page + left_click</td><td class="pass">✓ 点击成功</td><td>ref 定位帖子链接并进入详情</td></tr>
+    <tr><td>知乎首页</td><td>get_page_text</td><td class="pass">✓ 完整</td><td>已登录状态，提取推荐 Feed + 热榜</td></tr>
+    <tr><td>知乎搜索框</td><td>read_page</td><td class="pass">✓ 定位成功</td><td>找到 combobox "马龙出征全锦赛"</td></tr>
+    <tr><td>httpbin 填表</td><td>form_input × 7</td><td class="pass">✓ 全部正确</td><td>text/radio/checkbox/textarea 均验证通过</td></tr>
+    <tr><td>httpbin 提交</td><td>left_click + get_page_text</td><td class="pass">✓ 提交成功</td><td>返回的 JSON 确认所有字段值正确</td></tr>
+    <tr><td>httpbin Markdown</td><td>get_page_markdown</td><td class="pass">✓ 代码块</td><td>pre→```code``` 转换正确</td></tr>
+    <tr><td>合盖 + 插电</td><td>全部工具</td><td class="pass">✓ 正常</td><td>熄屏下浏览器操作完全可用</td></tr>
+    <tr><td>合盖 + 未插电</td><td>—</td><td class="warn">⚠ 不可用</td><td>macOS 合盖后 30s 系统休眠</td></tr>
+    <tr><td>小红书反爬</td><td>CDP 输入</td><td class="pass">✓ 未触发</td><td>真实 Edge 指纹 + CDP 合成事件</td></tr>
+  </table>
+</section>
+
+<!-- 技术细节 -->
+<section>
+  <h2 style="font-size:22px;margin-bottom:20px">技术细节</h2>
+
+  <div class="grid-2">
+    <div class="flow-section">
+      <h3>CDP 输入</h3>
+      <div style="padding:22px">
+        <div style="color:var(--muted);font-size:13px;margin-bottom:12px">通过 chrome.debugger 发送 CDP 命令，走真实浏览器输入管线</div>
+        <div class="code-block"><span class="cmt">// 点击流程</span>
+<span class="fn">Input.dispatchMouseEvent</span> mouseMoved → <span style="color:var(--muted)">50ms</span> →
+<span class="fn">Input.dispatchMouseEvent</span> mousePressed → <span style="color:var(--muted)">50ms</span> →
+<span class="fn">Input.dispatchMouseEvent</span> mouseReleased
+
+<span class="cmt">// 中文输入</span>
+<span class="fn">Input.insertText</span> { <span class="str">text: ch</span> }  <span class="cmt">// 逐字符</span></div>
+        <div class="tip-box" style="margin-top:12px;font-size:13px">✱ 每个 ASCII 字符 3 次 CDP 调用 (keyDown→char→keyUp) + 20ms 延迟<br>✱ 中文逐字符 Input.insertText + 10-30ms 随机延迟</div>
+      </div>
+    </div>
+
+    <div class="flow-section">
+      <h3>元素定位</h3>
+      <div style="padding:22px">
+        <div style="color:var(--muted);font-size:13px;margin-bottom:12px">WeakRef 元素映射 + ARIA 角色推导，不依赖 CSS selector</div>
+        <div class="code-block"><span class="cmt">// ref 系统</span>
+elementMap: <span class="fn">Map</span>&lt;<span class="str">"ref_1"</span>, <span class="fn">WeakRef</span>&gt;
+reverseMap: <span class="fn">WeakMap</span>&lt;<span class="fn">Element</span>, <span class="str">"ref_1"</span>&gt;
+
+<span class="cmt">// 角色推导</span>
+<span class="fn">getRole</span>(el): aria-role → tagName → onclick?
+<span class="fn">getAccessibleName</span>: aria-label → aria-labelledby → title
+  → placeholder → textContent
+
+<span class="cmt">// 元素树输出</span>
+[ref_48] <span class="str">textbox "搜索小红书"</span>
+[ref_13] <span class="str">combobox "马龙出征全锦赛"</font></div>
+      </div>
+    </div>
+
+    <div class="flow-section">
+      <h3>保活策略</h3>
+      <div style="padding:22px;font-size:14px">
+        <strong style="color:var(--accent)">双轨保活：</strong><br>
+        <span style="color:var(--green)">① setInterval</span> + chrome.storage.local.set 每 25s<br>
+        <span style="color:var(--green)">② chrome.alarms</span> 每 0.5min 后备唤醒<br><br>
+        <span style="color:var(--muted);font-size:13px">MV3 Service Worker 30s 空闲被回收 → alarms 唤醒 → 自动重连</span>
+      </div>
+    </div>
+
+    <div class="flow-section">
+      <h3>截图优化</h3>
+      <div style="padding:22px;font-size:14px">
+        <strong style="color:var(--accent)">三级质量自适应：</strong><br>
+        <span style="color:var(--green)">low</span> 20% (max 27KB) · <span style="color:var(--green)">medium</span> 40% (270KB) · <span style="color:var(--green)">high</span> 60% (670KB)<br><br>
+        <span style="color:var(--accent)">Emulation.setDeviceMetricsOverride</span><br>
+        <span style="color:var(--muted)">4K → 1280px 宽度缩放，避免质量降级循环 4 次 CDP 调用</span><br>
+        <span style="color:var(--accent)">坐标自动缩放</span><br>
+        <span style="color:var(--muted)">screenshotWidth → viewportWidth 比例映射</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Claude Code Browser Extension v1.0.0 · 1522 lines · Manifest V3 · CDP v1.3 · macOS / Linux / Windows<br>
+  Reference: QoderWork Browser Connector v1.5.1 · WorkBuddy superpowers-chrome
+</footer>
+
+</body>
+</html>
