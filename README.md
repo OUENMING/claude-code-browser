@@ -300,6 +300,15 @@ callExtension(tool, args):
 
 ---
 
+## 前置条件
+
+- Node.js >= 18
+- Edge 或 Chrome 浏览器
+- macOS / Linux / Windows 均可
+- 已安装 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI 并完成认证
+
+---
+
 ## 配置
 
 ### 安装 MCP 到 Claude Code

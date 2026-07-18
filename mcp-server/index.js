@@ -6,7 +6,9 @@ import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 
 const WS_PORT = 19222;
 const WS_URL = `ws://127.0.0.1:${WS_PORT}`;
-const PID_PATH = '/tmp/claude-browser-mcp.pid';
+const PID_PATH = process.platform === 'win32'
+  ? process.env.TEMP + '\\claude-browser-mcp.pid'
+  : '/tmp/claude-browser-mcp.pid';
 
 // Atomically claim PID file. Falls through if another process holds it —
 // port binding in start() is the authoritative conflict resolver.
