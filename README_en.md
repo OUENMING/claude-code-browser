@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License: MIT"></a>
   <a href="README.md"><img src="https://img.shields.io/badge/Lang-简体中文-lightgrey?style=flat-square" alt="简体中文"></a>
 </p>
 
@@ -321,9 +322,11 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 
 ---
 
-## Tech Stack
+## License
 
-| Layer | Technology |
+[MIT](LICENSE)
+
+## Tech Stack
 |-------|-----------|
 | Extension | Manifest V3, Service Worker, `chrome.debugger` (CDP v1.3), `chrome.scripting` |
 | MCP Server | Node.js, `@modelcontextprotocol/sdk`, `ws` (WebSocket Server) |

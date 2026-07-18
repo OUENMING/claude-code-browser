@@ -1,6 +1,7 @@
 # Claude Code 浏览器自动化 — 使用指南
 
 <p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License: MIT"></a>
   <a href="README_en.md"><img src="https://img.shields.io/badge/English-blue?style=flat-square" alt="English"></a>
 </p>
 
