@@ -277,6 +277,15 @@ Tools are executed in strict FIFO order per extension instance. Each tool has a 
 
 ---
 
+## Prerequisites
+
+- Node.js >= 18
+- Edge or Chrome browser
+- macOS / Linux / Windows all supported
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed and authenticated
+
+---
+
 ## Security Design
 
 | Mechanism | Detail |
