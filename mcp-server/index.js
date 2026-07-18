@@ -3,12 +3,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const WS_PORT = 19222;
 const WS_URL = `ws://127.0.0.1:${WS_PORT}`;
-const PID_PATH = process.platform === 'win32'
-  ? process.env.TEMP + '\\claude-browser-mcp.pid'
-  : '/tmp/claude-browser-mcp.pid';
+const PID_PATH = join(tmpdir(), 'claude-browser-mcp.pid');
 
 // Atomically claim PID file. Falls through if another process holds it —
 // port binding in start() is the authoritative conflict resolver.
@@ -27,8 +27,10 @@ function claimPidFile() {
   try {
     const oldPid = parseInt(readFileSync(PID_PATH, 'utf-8').trim(), 10);
     if (oldPid && !isNaN(oldPid) && oldPid !== process.pid) {
-      // Best-effort: if old process is dead (ESRCH), remove the stale file.
-      try { process.kill(oldPid, 0); } catch (e) { if (e.code === 'ESRCH') { try { unlinkSync(PID_PATH); } catch {} } }
+      // Best-effort: if old process is dead (ESRCH / EPERM on Windows), remove the stale file.
+      try { process.kill(oldPid, 0); } catch (e) {
+        if (e.code === 'ESRCH' || process.platform === 'win32') { try { unlinkSync(PID_PATH); } catch {} }
+      }
     }
   } catch { /* corrupt file */ try { unlinkSync(PID_PATH); } catch {} }
 
