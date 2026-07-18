@@ -1,5 +1,9 @@
 # Claude Code 浏览器自动化 — 使用指南
 
+<p align="center">
+  <a href="README_en.md"><img src="https://img.shields.io/badge/English-blue?style=flat-square" alt="English"></a>
+</p>
+
 ## 概述
 
 一个 Chrome/Edge Extension + MCP Server 的 AI 驱动浏览器自动化系统。让 Claude Code 能像人一样操控你的真实浏览器——导航、点击、输入、截图、提取内容——全部通过自然语言驱动。
