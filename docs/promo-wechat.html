@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>微信桥接 - 宣传图</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0d0d0d;
+  --card: #1a1a1a;
+  --border: #2a2a2a;
+  --accent: #4ade80;
+  --text: #f5f5f5;
+  --text-dim: #a0a0a0;
+  --text-muted: #666;
+}
+
+body {
+  font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 24px;
+}
+
+/* ====== CARD ====== */
+.card {
+  width: 1080px;
+  min-height: 1440px;
+  background: var(--card);
+  border-radius: 32px;
+  padding: 80px 64px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Cover */
+.card-cover {
+  background: linear-gradient(160deg, #0d0d0d 0%, #1a1a1a 35%, #0a1a0a 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.card-cover::before {
+  content: '';
+  position: absolute;
+  top: -160px; right: -160px;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(74,222,128,0.07) 0%, transparent 70%);
+  border-radius: 50%;
+}
+
+.card-cover::after {
+  content: '';
+  position: absolute;
+  bottom: -120px; left: -120px;
+  width: 350px; height: 350px;
+  background: radial-gradient(circle, rgba(74,222,128,0.05) 0%, transparent 70%);
+  border-radius: 50%;
+}
+
+.tags {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 48px;
+  z-index: 1;
+}
+
+.tag {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tag-green {
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.25);
+  color: var(--accent);
+}
+
+.tag-gray {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-dim);
+}
+
+.title {
+  font-size: 76px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -1.5px;
+  color: var(--text);
+  z-index: 1;
+  position: relative;
+}
+
+.title .hl { color: var(--accent); }
+
+.sub {
+  font-size: 24px;
+  color: var(--text-dim);
+  line-height: 1.8;
+  margin-top: 20px;
+  z-index: 1;
+  position: relative;
+}
+
+.divider {
+  width: 60px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: 40px 0;
+  z-index: 1;
+}
+
+.arch-box {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 36px;
+  z-index: 1;
+  position: relative;
+}
+
+.arch-box code {
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 15px;
+  color: var(--text-dim);
+  line-height: 2.2;
+  display: block;
+}
+
+.arch-box .hl { color: var(--accent); }
+.arch-box .arrow { color: var(--accent); opacity: 0.6; }
+
+.page-num {
+  position: absolute;
+  bottom: 28px;
+  right: 36px;
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+/* Feature page */
+.card-feature { padding: 80px 64px; }
+
+.label {
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 3px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.card-title {
+  font-size: 44px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 40px;
+  line-height: 1.3;
+}
+
+.f-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.f-item {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+}
+
+.f-icon { font-size: 28px; margin-bottom: 10px; display: block; }
+.f-name { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.f-desc { font-size: 14px; color: var(--text-dim); line-height: 1.7; }
+.f-tech {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid rgba(74,222,128,0.2);
+  font-family: 'SF Mono', monospace;
+  margin-top: 10px;
+}
+
+/* Flow */
+.flow-wrap {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 40px;
+  margin-top: 20px;
+}
+
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fb {
+  flex: 1;
+  padding: 16px 18px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.fb .l { font-size: 14px; color: var(--text); font-weight: 600; }
+.fb .d { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: 'SF Mono', monospace; }
+.fb.active { border-color: rgba(74,222,128,0.3); }
+.fb.active .l { color: var(--accent); }
+.far { font-size: 18px; color: var(--accent); flex-shrink: 0; }
+
+/* Detail grid */
+.d-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.d-item {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+}
+
+.d-item h4 { font-size: 15px; color: var(--text); margin-bottom: 5px; font-weight: 600; }
+.d-item p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+
+/* CTA */
+.card-cta {
+  background: linear-gradient(160deg, #0d0d0d 0%, #0a1a0a 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.cta-icon { font-size: 60px; margin-bottom: 28px; z-index: 1; }
+.cta-big { font-size: 46px; font-weight: 900; color: var(--text); margin-bottom: 12px; z-index: 1; }
+.cta-mid { font-size: 20px; color: var(--text-dim); line-height: 1.6; z-index: 1; margin-bottom: 36px; }
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 36px;
+  background: var(--accent);
+  color: #000;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 14px;
+  z-index: 1;
+}
+.repo { font-family: 'SF Mono', monospace; font-size: 16px; color: var(--text-muted); margin-top: 16px; z-index: 1; }
+.cta-footer {
+  position: absolute;
+  bottom: 36px;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 1080px) {
+  .card { width: 100%; min-height: auto; padding: 40px 28px; }
+  .title { font-size: 48px; }
+  .sub { font-size: 18px; }
+  .f-grid { grid-template-columns: 1fr; }
+  .d-grid { grid-template-columns: 1fr; }
+  .flow-row { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<!-- CARD 1: 封面 -->
+<div class="card card-cover">
+  <div class="tags">
+    <span class="tag tag-green">⚡ TypeScript</span>
+    <span class="tag tag-gray">🔗 MCP</span>
+    <span class="tag tag-gray">🍎 macOS</span>
+    <span class="tag tag-gray">🐧 Linux</span>
+  </div>
+
+  <div class="title">
+    在微信里<br>
+    <span class="hl">和 Claude 聊天</span>
+  </div>
+
+  <div class="sub">
+    扫码绑定，微信里多了一个"好友"<br>
+    发文字、图片、语音、文件，Claude 实时回复<br>
+    全本机运行，数据不上云
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="arch-box">
+    <code>
+      <span class="hl">微信</span>（手机）<br>
+      <span class="arrow">┃</span> iLink Bot API · 长轮询<br>
+      <span class="arrow">┃</span><br>
+      <span class="hl">Node.js 守护进程</span><br>
+      <span class="arrow">┃</span> 启动 claude CLI 子进程<br>
+      <span class="arrow">┃</span> 流式推送 · 消息聚合 · session 管理<br>
+      <span class="arrow">┃</span> 支持所有 MCP 工具<br>
+      <span class="hl">Claude Code</span>（本地运行）
+    </code>
+  </div>
+
+  <div class="page-num">1/4</div>
+</div>
+
+<!-- CARD 2: 功能 -->
+<div class="card card-feature">
+  <div class="label">✦ 核心功能</div>
+  <div class="card-title">能做什么</div>
+
+  <div class="f-grid">
+    <div class="f-item">
+      <span class="f-icon">💬</span>
+      <div class="f-name">双向消息</div>
+      <div class="f-desc">文字、图片（CDN AES-ECB 解密）、语音转文字、文件（最大 25MB）。加密媒体全自动处理。</div>
+      <span class="f-tech">AES-128-ECB · CDN</span>
+    </div>
+
+    <div class="f-item">
+      <span class="f-icon">⚡</span>
+      <div class="f-name">流式回复</div>
+      <div class="f-desc">Claude 生成过程中增量推送，微信显示"正在输入…"。5 分钟无响应自动发安抚消息。</div>
+      <span class="f-tech">stream-json · NDJSON</span>
+    </div>
+
+    <div class="f-item">
+      <span class="f-icon">🔄</span>
+      <div class="f-name">会话续接</div>
+      <div class="f-desc">跨消息保持上下文。自动损坏恢复，失败时注入最近 6 条聊天历史。</div>
+      <span class="f-tech">--resume · 30min TTL</span>
+    </div>
+
+    <div class="f-item">
+      <span class="f-icon">📎</span>
+      <div class="f-name">自动文件推送</div>
+      <div class="f-desc">Claude 生成的文件自动发到微信。21 种扩展名支持，限频时指数退避重试。</div>
+      <span class="f-tech">15s→30s→45s</span>
+    </div>
+
+    <div class="f-item">
+      <span class="f-icon">🛡️</span>
+      <div class="f-name">工具循环保护</div>
+      <div class="f-desc">同一工具连续 15 次无输出自动终止。支持 MiMo/DeepSeek 思维链不误杀。</div>
+      <span class="f-tech">thinking 感知</span>
+    </div>
+
+    <div class="f-item">
+      <span class="f-icon">🔧</span>
+      <div class="f-name">15+ 命令</div>
+      <div class="f-desc">/model /effort /clear /stop /reset /undo /compact /send /skills /&lt;skill&gt; 等</div>
+      <span class="f-tech">handler 分发</span>
+    </div>
+  </div>
+  <div class="page-num">2/4</div>
+</div>
+
+<!-- CARD 3: 技术 -->
+<div class="card card-feature">
+  <div class="label">✦ 技术细节</div>
+  <div class="card-title">工作原理</div>
+
+  <div class="flow-wrap">
+    <div class="flow-row">
+      <div class="fb"><div class="l">📱 微信</div><div class="d">iLink API · 35s 长轮询</div></div>
+      <div class="far">→</div>
+      <div class="fb"><div class="l">📡 monitor.ts</div><div class="d">消息去重 · 退避 · 异步处理</div></div>
+    </div>
+    <div class="flow-row">
+      <div class="fb"><div class="l">📨 main.ts</div><div class="d">聚合 · 截流 · session</div></div>
+      <div class="far">→</div>
+      <div class="fb active"><div class="l">🤖 provider.ts</div><div class="d">spawn claude · 流式 I/O</div></div>
+    </div>
+    <div class="flow-row" style="margin-bottom:0">
+      <div class="fb"><div class="l">📤 sender</div><div class="d">typing + 分块发送</div></div>
+      <div class="far">→</div>
+      <div class="fb"><div class="l">📱 微信</div><div class="d">增量回复</div></div>
+    </div>
+  </div>
+
+  <div class="label" style="margin-top:36px">✦ 设计要点</div>
+  <div class="card-title" style="font-size:26px;margin-bottom:20px">关键决策</div>
+
+  <div class="d-grid">
+    <div class="d-item">
+      <h4>消息聚合</h4>
+      <p>多图 2 秒防抖收集，5 分钟内文字触发合并查询。超时附件自动丢弃。</p>
+    </div>
+    <div class="d-item">
+      <h4>中途截流</h4>
+      <p>处理中发新消息 → 终止当前查询 → 合并上下文重新发送。</p>
+    </div>
+    <div class="d-item">
+      <h4>智能分割</h4>
+      <p>段落边界优先切分，保持 markdown 完整。三层降级：换行→句号→硬切。</p>
+    </div>
+    <div class="d-item">
+      <h4>日志脱敏</h4>
+      <p>Bearer token、bot token、context token、API key 全部正则脱敏后写入。</p>
+    </div>
+    <div class="d-item">
+      <h4>限频保护</h4>
+      <p>每用户 2.5s 最小间隔。ret:-2 时退避 5s→10s→30s。typing ticket 缓存 24h。</p>
+    </div>
+    <div class="d-item">
+      <h4>崩溃恢复</h4>
+      <p>启动时检测残留 processing 状态自动重置。launchd KeepAlive 保证自动重启。</p>
+    </div>
+  </div>
+  <div class="page-num">3/4</div>
+</div>
+
+<!-- CARD 4: CTA -->
+<div class="card card-cta">
+  <div class="cta-icon">🤖</div>
+  <div class="cta-big">WeChat Claude Code Bridge</div>
+  <div class="cta-mid">
+    开源 · MIT 协议<br>
+    TypeScript 编写 · 全本地运行 · 隐私优先
+  </div>
+  <div class="cta-btn">📦 查看 GitHub</div>
+  <div class="repo">github.com/OUENMING/wechat-claude-code</div>
+
+  <div style="margin-top:56px;border-top:1px solid var(--border);padding-top:28px;width:80%">
+    <div style="display:flex;justify-content:center;gap:32px;color:var(--text-muted);font-size:14px;">
+      <span>💬 文字·图片·语音·文件</span>
+      <span>⚡ 流式回复</span>
+      <span>🔒 本地运行</span>
+    </div>
+  </div>
+
+  <div class="cta-footer">基于 Wechat-ggGitHub/wechat-claude-code (MIT)</div>
+  <div class="page-num">4/4</div>
+</div>
+
+</body>
+</html>

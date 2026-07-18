@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>浏览器 MCP - 宣传图</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0d0d0d;
+  --card: #1a1a1a;
+  --border: #2a2a2a;
+  --accent: #60a5fa;
+  --text: #f5f5f5;
+  --text-dim: #a0a0a0;
+  --text-muted: #666;
+}
+
+body {
+  font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 24px;
+}
+
+.card {
+  width: 1080px;
+  min-height: 1440px;
+  background: var(--card);
+  border-radius: 32px;
+  padding: 80px 64px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Cover */
+.card-cover {
+  background: linear-gradient(160deg, #0d0d0d 0%, #1a1a1a 35%, #0a0f1a 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.card-cover::before {
+  content: '';
+  position: absolute;
+  top: -160px; right: -160px;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(96,165,250,0.07) 0%, transparent 70%);
+  border-radius: 50%;
+}
+
+.tags {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 48px;
+  z-index: 1;
+}
+
+.tag {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tag-blue { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.25); color: var(--accent); }
+.tag-green { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.25); color: #4ade80; }
+.tag-gray { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-dim); }
+
+.title {
+  font-size: 76px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -1.5px;
+  color: var(--text);
+  z-index: 1;
+  position: relative;
+}
+
+.title .hl { color: var(--accent); }
+
+.sub {
+  font-size: 24px;
+  color: var(--text-dim);
+  line-height: 1.8;
+  margin-top: 20px;
+  z-index: 1;
+  position: relative;
+}
+
+.divider {
+  width: 60px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: 40px 0;
+  z-index: 1;
+}
+
+.arch-box {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 36px;
+  z-index: 1;
+  position: relative;
+}
+
+.arch-box code {
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 15px;
+  color: var(--text-dim);
+  line-height: 2.2;
+  display: block;
+}
+
+.arch-box .hl-blue { color: var(--accent); }
+.arch-box .hl-green { color: #4ade80; }
+.arch-box .arrow { color: var(--accent); opacity: 0.6; }
+
+.page-num {
+  position: absolute;
+  bottom: 28px;
+  right: 36px;
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+/* Feature page */
+.card-feature { padding: 80px 64px; }
+
+.label {
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 3px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.card-title {
+  font-size: 44px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 36px;
+  line-height: 1.3;
+}
+
+/* Tool list */
+.tool-group { margin-bottom: 24px; }
+.tg-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+
+.t-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
+.t-name {
+  font-family: 'SF Mono', monospace;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+.t-params {
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 130px;
+}
+
+.t-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* Flow */
+.flow-wrap { background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 20px; padding: 36px; margin-top: 16px; }
+.flow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.fb { flex: 1; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; text-align: center; }
+.fb .l { font-size: 14px; color: var(--text); font-weight: 600; }
+.fb .d { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: 'SF Mono', monospace; }
+.fb.active { border-color: rgba(96,165,250,0.3); }
+.fb.active .l { color: var(--accent); }
+.far { font-size: 18px; color: var(--accent); flex-shrink: 0; }
+
+/* Scripts */
+.sc-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 12px;
+}
+
+.sc-name { font-family: 'SF Mono', monospace; font-size: 14px; color: var(--accent); font-weight: 600; margin-bottom: 5px; }
+.sc-desc { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+
+/* CTA */
+.card-cta {
+  background: linear-gradient(160deg, #0d0d0d 0%, #0a0f1a 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.cta-icon { font-size: 60px; margin-bottom: 28px; z-index: 1; }
+.cta-big { font-size: 46px; font-weight: 900; color: var(--text); margin-bottom: 12px; z-index: 1; }
+.cta-mid { font-size: 20px; color: var(--text-dim); line-height: 1.6; z-index: 1; margin-bottom: 36px; }
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 36px;
+  background: var(--accent);
+  color: #000;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 14px;
+  z-index: 1;
+}
+.repo { font-family: 'SF Mono', monospace; font-size: 16px; color: var(--text-muted); margin-top: 16px; z-index: 1; }
+.cta-footer { position: absolute; bottom: 36px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text-muted); }
+
+@media (max-width: 1080px) {
+  .card { width: 100%; min-height: auto; padding: 40px 28px; }
+  .title { font-size: 48px; }
+  .sub { font-size: 18px; }
+  .t-row { flex-direction: column; gap: 4px; }
+  .flow-row { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<!-- CARD 1: 封面 -->
+<div class="card card-cover">
+  <div class="tags">
+    <span class="tag tag-blue">🌐 Chrome Extension</span>
+    <span class="tag tag-green">⚡ MCP Server</span>
+    <span class="tag tag-gray">🔗 CDP v1.3</span>
+  </div>
+
+  <div class="title">
+    Claude Code<br>
+    <span class="hl">浏览器自动化</span>
+  </div>
+
+  <div class="sub">
+    AI 操控你的真实浏览器<br>
+    导航、点击、填表、截图、提取内容<br>
+    绕过小红书/B站/知乎的反爬检测
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="arch-box">
+    <code>
+      <span class="hl-blue">Claude Code</span><br>
+      <span class="arrow">┃</span> stdio · MCP 协议<br>
+      <span class="arrow">┃</span><br>
+      <span class="hl-green">MCP Server</span>（index.js）<br>
+      <span class="arrow">┃</span> WebSocket 127.0.0.1:19222<br>
+      <span class="arrow">┃</span> 服务端/客户端双模式 · PID 文件锁<br>
+      <span class="hl-green">Chrome Extension</span>（background.js）<br>
+      <span class="arrow">┃</span> CDP · Manifest V3 · Service Worker<br>
+      <span class="arrow">┃</span><br>
+      <span class="hl-blue">真实浏览器</span>（Edge/Chrome）
+    </code>
+  </div>
+
+  <div class="page-num">1/4</div>
+</div>
+
+<!-- CARD 2: 工具 -->
+<div class="card card-feature">
+  <div class="label">✦ 14 个工具</div>
+  <div class="card-title">能做什么</div>
+
+  <div class="tool-group">
+    <div class="tg-title">🧭 导航 & 页面读取</div>
+    <div class="t-row">
+      <span class="t-name">navigate</span>
+      <span class="t-params">url, tabId?</span>
+      <span class="t-desc">导航到 URL，支持 back/forward</span>
+    </div>
+    <div class="t-row">
+      <span class="t-name">read_page</span>
+      <span class="t-params">filter, max_chars?</span>
+      <span class="t-desc">可访问性树（interactive/all 模式），内置错误诊断</span>
+    </div>
+    <div class="t-row">
+      <span class="t-name">find</span>
+      <span class="t-params">query, max?</span>
+      <span class="t-desc">多词搜索元素，打分排序返回 ref</span>
+    </div>
+    <div class="t-row" style="margin-bottom:0">
+      <span class="t-name">wait_for</span>
+      <span class="t-params">selector/text</span>
+      <span class="t-desc">等待元素或文本出现，10s 超时，300ms 轮询</span>
+    </div>
+  </div>
+
+  <div class="tool-group">
+    <div class="tg-title">🖱️ 交互 & 表单</div>
+    <div class="t-row">
+      <span class="t-name">computer</span>
+      <span class="t-params">14 种动作</span>
+      <span class="t-desc">点击/输入/截图/滚动/拖拽/缩放。ref 精准 or 坐标</span>
+    </div>
+    <div class="t-row" style="margin-bottom:0">
+      <span class="t-name">form_input</span>
+      <span class="t-params">ref+value</span>
+      <span class="t-desc">单个或批量填表。React/Vue 受控组件兼容</span>
+    </div>
+  </div>
+
+  <div class="tool-group">
+    <div class="tg-title">📝 内容提取</div>
+    <div class="t-row">
+      <span class="t-name">get_page_markdown</span>
+      <span class="t-params">max_chars?</span>
+      <span class="t-desc">结构化 Markdown。标题/链接/代码块/表格（10×8）/列表</span>
+    </div>
+    <div class="t-row" style="margin-bottom:0">
+      <span class="t-name">get_page_text</span>
+      <span class="t-params">max_chars?</span>
+      <span class="t-desc">纯文本提取。10+ 启发式选择器自动定位正文</span>
+    </div>
+  </div>
+
+  <div class="tool-group" style="margin-bottom:0">
+    <div class="tg-title">🔧 调试 & 标签</div>
+    <div class="t-row">
+      <span class="t-name">javascript_tool</span>
+      <span class="t-params">text</span>
+      <span class="t-desc">页面内执行 JS，CDP 兜底</span>
+    </div>
+    <div class="t-row">
+      <span class="t-name">read_console / read_network</span>
+      <span class="t-params">tabId</span>
+      <span class="t-desc">读取控制台和网络请求，支持正则过滤</span>
+    </div>
+    <div class="t-row">
+      <span class="t-name">tabs_context / tabs_create</span>
+      <span class="t-params">—</span>
+      <span class="t-desc">列出所有标签 / 创建新标签</span>
+    </div>
+    <div class="t-row" style="margin-bottom:0">
+      <span class="t-name">dismiss_dialog</span>
+      <span class="t-params">action</span>
+      <span class="t-desc">关闭 alert/confirm/prompt 对话框</span>
+    </div>
+  </div>
+
+  <div class="page-num">2/4</div>
+</div>
+
+<!-- CARD 3: 架构 -->
+<div class="card card-feature">
+  <div class="label">✦ 架构</div>
+  <div class="card-title">双模式 MCP Server</div>
+
+  <div class="flow-wrap">
+    <div class="flow-row">
+      <div class="fb"><div class="l">MCP Server</div><div class="d">端口 19222</div></div>
+      <div class="far">→</div>
+      <div class="fb active"><div class="l">Chrome Extension</div><div class="d">WebSocket · CDP v1.3</div></div>
+      <div class="far">→</div>
+      <div class="fb"><div class="l">浏览器标签</div><div class="d">Edge/Chrome</div></div>
+    </div>
+    <div style="text-align:center;margin-top:10px;color:var(--text-muted);font-size:12px;">
+      EADDRINUSE → 客户端模式 · PID 锁 · routeTable 多客户端
+    </div>
+  </div>
+
+  <div class="label" style="margin-top:36px">✦ 四大 Content Script</div>
+  <div class="card-title" style="font-size:28px;margin-bottom:20px">Extension 核心</div>
+
+  <div class="sc-card">
+    <div class="sc-name">accessibility-tree.js</div>
+    <div class="sc-desc">WeakRef 元素映射，30+ ARIA 角色检测。interactive 模式（省 token）和 all 模式。状态显示（禁用/选中/只读），字符上限截断可续接。</div>
+  </div>
+  <div class="sc-card">
+    <div class="sc-name">page-bridge.js</div>
+    <div class="sc-desc">正文自动检测。表单填充走 prototype setter 兼容 React/Vue。事件序列：InputEvent('input', inputType:'insertText') + Event('change')。多词元素搜索。</div>
+  </div>
+  <div class="sc-card">
+    <div class="sc-name">auto-capture.js</div>
+    <div class="sc-desc">HTML→Markdown 转换。过滤 &lt;50px 装饰图标。表格限制 10 行 8 列，嵌套列表递归，details/summary 支持。</div>
+  </div>
+  <div class="sc-card" style="margin-bottom:0">
+    <div class="sc-name">visual-indicator.js</div>
+    <div class="sc-desc">Shadow DOM 叠加层 UI。元素绿色脉冲高亮，loading/completed/error 状态徽章，Agent 操作中脉冲边框 + 停止按钮。7 种 message 类型。</div>
+  </div>
+
+  <div class="page-num">3/4</div>
+</div>
+
+<!-- CARD 4: CTA -->
+<div class="card card-cta">
+  <div class="cta-icon">🌐</div>
+  <div class="cta-big">Claude Code 浏览器自动化</div>
+  <div class="cta-mid">
+    开源 · MCP 协议 · Chrome/Edge Extension<br>
+    14 个工具 · 100% 本地运行 · 真实浏览器
+  </div>
+  <div class="cta-btn">📦 查看 GitHub</div>
+  <div class="repo">github.com/OUENMING/claude-code-browser</div>
+
+  <div style="margin-top:56px;border-top:1px solid var(--border);padding-top:28px;width:80%">
+    <div style="display:flex;justify-content:center;gap:32px;color:var(--text-muted);font-size:14px;">
+      <span>🌐 导航</span>
+      <span>🖱️ 点击输入</span>
+      <span>📸 截图</span>
+      <span>📝 提取</span>
+    </div>
+  </div>
+
+  <div class="cta-footer">MV3 SW · FIFO 队列 · 双轨保活 · CDP v1.3</div>
+  <div class="page-num">4/4</div>
+</div>
+
+</body>
+</html>
