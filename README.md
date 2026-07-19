@@ -283,6 +283,10 @@ Copyright (c) 2026 Owen
 
 ## Star History
 
-如果觉得项目不错，欢迎点个 Star ⭐
-
-[![Star History Chart](https://api.star-history.com/svg?repos=OUENMING/claude-code-browser&type=Date)](https://star-history.com/#OUENMING/claude-code-browser&Date)
+<a href="https://www.star-history.com/?repos=OUENMING%2Fclaude-code-browser&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=OUENMING/claude-code-browser&type=date&theme=dark&legend=top-left&sealed_token=1XVxC84Hpu0RJwfCDSX51MDZeW15ak8AkCigZFs43zLKRoT88M-4C3r8f79S3d5qfL3dTQIk6KQ2rwtfMy0QyC1dqnjvqkK6ujtmhY6uSk_Lo1WviIA6Gg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=OUENMING/claude-code-browser&type=date&legend=top-left&sealed_token=1XVxC84Hpu0RJwfCDSX51MDZeW15ak8AkCigZFs43zLKRoT88M-4C3r8f79S3d5qfL3dTQIk6KQ2rwtfMy0QyC1dqnjvqkK6ujtmhY6uSk_Lo1WviIA6Gg" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=OUENMING/claude-code-browser&type=date&legend=top-left&sealed_token=1XVxC84Hpu0RJwfCDSX51MDZeW15ak8AkCigZFs43zLKRoT88M-4C3r8f79S3d5qfL3dTQIk6KQ2rwtfMy0QyC1dqnjvqkK6ujtmhY6uSk_Lo1WviIA6Gg" />
+ </picture>
+</a>
