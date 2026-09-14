@@ -265,14 +265,14 @@ function becomeClient() {
 // ---------------------------------------------------------------------------
 // MCP tool wiring (identical in both modes — all calls go through extWs)
 // ---------------------------------------------------------------------------
-function callExtension(tool, args) {
+function callExtension(tool, args, timeoutMs = 30000) {
   if (!extConnected || !extWs) throw new Error('Browser extension not connected');
   const id = msgId++;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`Timeout calling ${tool}`));
-    }, 30000);
+    }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
     extWs.send(JSON.stringify({ type: 'tool_call', id, tool, args }));
   });
@@ -280,11 +280,11 @@ function callExtension(tool, args) {
 
 const TOOLS = [
   { name: 'navigate', description: '导航到指定 URL，支持 "back"/"forward" 前进后退。', inputSchema: { type: 'object', properties: { url: { type: 'string' }, tabId: { type: 'number' } }, required: ['url'] } },
-  { name: 'read_page', description: '获取页面可访问性元素树，带 ref ID。filter="interactive" 仅交互元素（省 token），"all" 全部元素。', inputSchema: { type: 'object', properties: { filter: { type: 'string', enum: ['interactive', 'all'] }, depth: { type: 'integer', minimum: 1, maximum: 30 }, max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, ref_id: { type: 'string' }, tabId: { type: 'number' } } } },
+  { name: 'read_page', description: '获取页面可访问性元素树，带 ref ID。filter="interactive" 仅交互元素（省 token），"all" 全部元素。keywords 空格分隔，只输出匹配元素（省 token 的定向读取）。diff=true 只返回相对上次快照的变化（省 token）。', inputSchema: { type: 'object', properties: { filter: { type: 'string', enum: ['interactive', 'all'] }, depth: { type: 'integer', minimum: 1, maximum: 30 }, max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, ref_id: { type: 'string' }, keywords: { type: 'string' }, diff: { type: 'boolean' }, tabId: { type: 'number' } } } },
   { name: 'find', description: '按关键词搜索元素，匹配 text/aria-label/title/role，返回 ref 列表。', inputSchema: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer', minimum: 1, maximum: 100 }, tabId: { type: 'number' } }, required: ['query'] } },
   { name: 'wait_for', description: '等待元素或文本出现。selector 按 CSS 匹配可见元素，text 按页面文本匹配。默认超时 10s，300ms 轮询。', inputSchema: { type: 'object', properties: { selector: { type: 'string' }, text: { type: 'string' }, timeout: { type: 'integer', minimum: 500, maximum: 30000 }, tabId: { type: 'number' } } } },
   { name: 'dismiss_dialog', description: '关闭浏览器原生对话框（alert/confirm/prompt/beforeunload）。action="accept" 确认，"dismiss" 取消。', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' }, tabId: { type: 'number' } }, required: ['action'] } },
-  { name: 'computer', description: '鼠标/键盘/截图交互。ref 精确定位，coordinate 像素坐标。type 逐字符输入带 20ms 延迟。', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['left_click','right_click','double_click','triple_click','type','screenshot','screenshot_element','wait','scroll','scroll_to','key','left_click_drag','hover','zoom'] }, coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, start_coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, ref: { type: 'string' }, text: { type: 'string' }, scroll_direction: { type: 'string', enum: ['up','down','left','right'] }, scroll_amount: { type: 'number', minimum: 1, maximum: 10 }, quality: { type: 'string', enum: ['low','medium','high'] }, duration: { type: 'number', minimum: 0, maximum: 10 }, region: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 }, modifiers: { type: 'string' }, repeat: { type: 'number', minimum: 1, maximum: 100 }, tabId: { type: 'number' } }, required: ['action'] } },
+  { name: 'computer', description: '鼠标/键盘/截图交互。ref 精确定位，coordinate 像素坐标。type 逐字符输入带 20ms 延迟。点击/按键默认自动校验页面是否发生变化（verify=false 关闭）。', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['left_click','right_click','double_click','triple_click','type','screenshot','screenshot_element','wait','scroll','scroll_to','key','left_click_drag','hover','zoom'] }, coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, start_coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, ref: { type: 'string' }, text: { type: 'string' }, scroll_direction: { type: 'string', enum: ['up','down','left','right'] }, scroll_amount: { type: 'number', minimum: 1, maximum: 10 }, quality: { type: 'string', enum: ['low','medium','high'] }, duration: { type: 'number', minimum: 0, maximum: 10 }, region: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 }, modifiers: { type: 'string' }, repeat: { type: 'number', minimum: 1, maximum: 100 }, verify: { type: 'boolean' }, tabId: { type: 'number' } }, required: ['action'] } },
   { name: 'form_input', description: '设置表单字段值（单个或批量）。单字段用 ref+value，批量用 fields: [{ref, value}, ...]。React/Vue 受控组件兼容。', inputSchema: { type: 'object', properties: { ref: { type: 'string' }, value: { type: ['string','boolean','number'] }, fields: { type: 'array', items: { type: 'object', properties: { ref: { type: 'string' }, value: { type: ['string','boolean','number'] } }, required: ['ref','value'] } }, tabId: { type: 'number' } } } },
   { name: 'get_page_text', description: '提取页面全部纯文本（textContent）。最完整不丢内容，但失去结构。适合社交媒体、复杂 SPA。', inputSchema: { type: 'object', properties: { max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, tabId: { type: 'number' } } } },
   { name: 'get_page_markdown', description: '提取页面为结构化 Markdown — 标题(#)、链接、代码块、表格、图片。过滤 <50px 装饰图标。漏内容时回退到 get_page_text。', inputSchema: { type: 'object', properties: { max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, tabId: { type: 'number' } } } },
@@ -292,7 +292,8 @@ const TOOLS = [
   { name: 'tabs_context', description: '列出所有打开的标签页。', inputSchema: { type: 'object', properties: {} } },
   { name: 'tabs_create', description: '创建新的空白标签页。', inputSchema: { type: 'object', properties: {} } },
   { name: 'read_console_messages', description: '读取浏览器控制台消息。', inputSchema: { type: 'object', properties: { tabId: { type: 'number' }, onlyErrors: { type: 'boolean' }, pattern: { type: 'string' }, clear: { type: 'boolean' }, limit: { type: 'integer' } }, required: ['tabId'] } },
-  { name: 'read_network_requests', description: '读取 HTTP 网络请求。', inputSchema: { type: 'object', properties: { tabId: { type: 'number' }, urlPattern: { type: 'string' }, clear: { type: 'boolean' }, limit: { type: 'integer' } }, required: ['tabId'] } }
+  { name: 'read_network_requests', description: '读取 HTTP 网络请求。', inputSchema: { type: 'object', properties: { tabId: { type: 'number' }, urlPattern: { type: 'string' }, clear: { type: 'boolean' }, limit: { type: 'integer' } }, required: ['tabId'] } },
+  { name: 'health_check', description: '端到端链路体检：MCP server → WebSocket → 扩展 → CDP，逐跳报告状态。工具调用异常时先用它定位是哪一跳断了。', inputSchema: { type: 'object', properties: {} } }
 ];
 
 const server = new Server(
@@ -300,9 +301,30 @@ const server = new Server(
   { capabilities: { tools: {} } }
 );
 
+const SERVER_START = Date.now();
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  // Health check spans hops this process can't see, so it merges its own state
+  // with the extension's report — and never throws, since the failure itself
+  // is the diagnosis.
+  if (req.params.name === 'health_check') {
+    const lines = [
+      `MCP server: pid=${process.pid} mode=${isClientMode ? 'client' : 'server'} port=${WS_PORT} uptime=${Math.round((Date.now() - SERVER_START) / 1000)}s`,
+      `Hop 0 · server → extension link: ${extConnected ? 'OK' : 'DISCONNECTED'}${pending.size ? ` (${pending.size} in-flight call(s))` : ''}`,
+      '--- extension side ---'
+    ];
+    try {
+      const r = await callExtension('health_check', {}, 8000);
+      lines.push(r?.content?.find(c => c.type === 'text')?.text || '(extension returned no detail)');
+    } catch (e) {
+      lines.push(`UNREACHABLE — ${e.message}`);
+      lines.push('Fix order: (1) reload the extension at edge://extensions — this kills no processes; (2) /mcp reconnect; (3) only if both fail, restart the session. Do not kill node processes: the port holder is the server every other session depends on.');
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+
   try {
     const result = await callExtension(req.params.name, req.params.arguments || {});
     // Inject connection health into tabs_context response

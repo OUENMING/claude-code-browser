@@ -84,10 +84,11 @@
             'option','tab','switch'].includes(getRole(el));
   }
 
-  function generate(mode = 'interactive', maxDepth = 15, maxChars = 50000, focusRef = null) {
+  function generate(mode = 'interactive', maxDepth = 15, maxChars = 50000, focusRef = null, keywords = null) {
     // Hard ceiling — even if caller passes a huge depth, cap it to prevent
     // unreadable truncated output on dense pages (e.g. Amazon/Taobao).
     const depthLimit = Math.min(maxDepth, 30);
+    const kwList = keywords ? String(keywords).toLowerCase().split(/\s+/).filter(Boolean) : null;
     let focusEl = null;
     if (focusRef) {
       focusEl = getElementByRef(focusRef);
@@ -96,15 +97,30 @@
     const lines = [];
     let chars = 0, truncated = false, lastRef = null;
 
+    // Recursion helper: pierces iframe (same-origin) and shadow DOM so refs
+    // cover embedded widgets, not just top-level document.body children.
+    function recurseChildren(el, depth) {
+      for (const c of el.children) walk(c, depth + 1);
+      if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c, depth + 1);
+      if (el.tagName === 'IFRAME' && el.contentDocument?.body)
+        for (const c of el.contentDocument.body.children) walk(c, depth + 1);
+    }
+
     function walk(el, depth) {
       if (truncated || !isVisible(el)) return;
       if (mode !== 'interactive' && depth > depthLimit) return;
       const role = getRole(el);
       if (mode === 'interactive' && !isInteractive(el) && !role) {
-        for (const c of el.children) walk(c, depth);
+        recurseChildren(el, depth);
         return;
       }
       const ref = getRefForElement(el), name = getAccessibleName(el);
+      // Keyword mode: only emit matching elements, but keep descending so
+      // deeper matches aren't missed. Cuts output to what the task needs.
+      if (kwList) {
+        const hay = `${name} ${role} ${(el.textContent || '').slice(0, 300)}`.toLowerCase();
+        if (!kwList.some(k => hay.includes(k))) { recurseChildren(el, depth); return; }
+      }
       const indent = '  '.repeat(Math.min(depth, 10));
       let line = `${indent}[${ref}] ${role}`;
       if (name) line += ` "${name}"`;
@@ -134,7 +150,7 @@
       lines.push(line);
       chars += line.length + 1;
       lastRef = ref;
-      for (const c of el.children) walk(c, depth + 1);
+      recurseChildren(el, depth);
     }
 
     if (focusEl) walk(focusEl, 0);
@@ -147,8 +163,56 @@
     };
   }
 
+  // Cheap page fingerprint — used to detect whether an action changed anything.
+  // Deliberately avoids generate(): no string building, no ref assignment, and a
+  // layout-only visibility proxy instead of per-element getComputedStyle.
+  function signature() {
+    const parts = [];
+    let count = 0, interactive = 0, nonInteractiveText = 0;
+    const MAX_NODES = 20000, MAX_PARTS = 4000;
+
+    function visibleish(el) {
+      if (el.offsetWidth > 0 || el.offsetHeight > 0) return true;
+      return !!el.getClientRects?.().length;
+    }
+
+    function walk(el) {
+      if (count >= MAX_NODES) return;
+      if (!visibleish(el)) return;
+      count++;
+      const role = getRole(el);
+      if (role && isInteractive(el)) {
+        interactive++;
+        if (parts.length < MAX_PARTS) {
+          parts.push(`${role}|${getAccessibleName(el)}|${el.value ?? ''}|${el.checked ?? ''}|${el.disabled ? 1 : 0}`);
+        }
+      } else if (!role) {
+        // Text nodes carry the bulk of "did something appear" signal.
+        const t = (el.children.length === 0 && el.textContent) ? el.textContent.trim() : '';
+        if (t) nonInteractiveText += t.length;
+      }
+      for (const c of el.children) walk(c);
+      if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c);
+    }
+
+    if (document.body) walk(document.body);
+
+    // Include text volume in the hash so expansion of a collapsed panel registers
+    // even when no new interactive element appears.
+    const s = parts.join(';') + `#${count}#${nonInteractiveText}`;
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+
+    return {
+      sig: String(h >>> 0),
+      title: document.title,
+      url: location.href,
+      count, interactive, textChars: nonInteractiveText
+    };
+  }
+
   globalThis.__ccAccessibilityTree = {
-    generate, getElementCoordinates, getElementByRef, getRefForElement,
+    generate, getElementCoordinates, getElementByRef, getRefForElement, signature,
     elementMap, get elementCount() { return elementMap.size; }
   };
 })();

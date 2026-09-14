@@ -26,6 +26,11 @@
     try {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const tag = el.tagName.toLowerCase();
+      // Focus first so a later blur() fires the full focus→input→change→blur
+      // chain that React/Vue controlled components expect on commit.
+      if (!(tag === 'input' && (el.type || '').toLowerCase() === 'file')) {
+        try { el.focus(); } catch {}
+      }
 
       if (tag === 'select') {
         let found = false;
@@ -40,7 +45,8 @@
           el.checked = !!value;
           el.dispatchEvent(new Event('change', { bubbles: true }));
         } else if (t === 'file') {
-          return { success: false, error: 'File uploads require CDP commands' };
+          // background.js handles uploads via CDP DOM.setFileInputFiles
+          return { success: false, fileInput: true, ref };
         } else {
           setNativeValue(el, String(value));
         }
@@ -56,6 +62,8 @@
         const len = (el.value || '').length;
         el.setSelectionRange(len, len);
       }
+      // Real blur (moves focus away, fires native focusout) commits controlled components.
+      if (document.activeElement === el) el.blur();
       return { success: true, fieldName: el.name || el.id || ref };
     } catch (e) {
       return { success: false, error: e.message || 'Failed to fill form field' };

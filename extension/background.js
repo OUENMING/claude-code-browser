@@ -8,6 +8,8 @@ const state = {
   screenshotContexts: new Map(),
   tabEventBuffers: new Map(),
   pendingDialogs: new Map(),   // tabId -> {type, message, defaultPrompt}
+  snapshots: new Map(),        // tabId -> {tree, ts} — last read_page result, for diff
+  startedAt: Date.now(),
 };
 
 function initTabBuffer(tabId) {
@@ -19,11 +21,11 @@ function initTabBuffer(tabId) {
 const BLOCKED_URLS = ['chrome://', 'chrome-extension://', 'edge://', 'about:', 'devtools://', 'view-source:'];
 const TOOL_DEFINITIONS = [
   { name: 'navigate', inputSchema: { type: 'object', properties: { url: { type: 'string' }, tabId: { type: 'number' } }, required: ['url'] }, description: '导航到指定 URL，支持 "back"/"forward" 前进后退。' },
-  { name: 'read_page', inputSchema: { type: 'object', properties: { filter: { type: 'string', enum: ['interactive', 'all'] }, depth: { type: 'integer', minimum: 1, maximum: 30 }, max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, ref_id: { type: 'string' }, tabId: { type: 'number' } } }, description: '获取页面可访问性元素树，带 ref ID。filter="interactive" 仅交互元素（省 token），"all" 全部元素。' },
+  { name: 'read_page', inputSchema: { type: 'object', properties: { filter: { type: 'string', enum: ['interactive', 'all'] }, depth: { type: 'integer', minimum: 1, maximum: 30 }, max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, ref_id: { type: 'string' }, keywords: { type: 'string' }, diff: { type: 'boolean' }, tabId: { type: 'number' } } }, description: '获取页面可访问性元素树，带 ref ID。filter="interactive" 仅交互元素（省 token），"all" 全部元素。keywords 空格分隔，只输出匹配元素（省 token 的定向读取）。diff=true 只返回相对上次快照的变化（省 token）。' },
   { name: 'find', inputSchema: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer', minimum: 1, maximum: 100 }, tabId: { type: 'number' } }, required: ['query'] }, description: '按关键词搜索元素，匹配 text/aria-label/title/role，返回 ref 列表供 computer/form_input 使用。' },
   { name: 'wait_for', inputSchema: { type: 'object', properties: { selector: { type: 'string' }, text: { type: 'string' }, timeout: { type: 'integer', minimum: 500, maximum: 30000 }, tabId: { type: 'number' } } }, description: '等待元素或文本出现。selector 按 CSS 匹配可见元素，text 按页面文本匹配。默认超时 10s，300ms 轮询。navigate 后页面加载中自动等待 body 出现。' },
   { name: 'dismiss_dialog', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' }, tabId: { type: 'number' } }, required: ['action'] }, description: '关闭浏览器原生对话框（alert/confirm/prompt/beforeunload）。action="accept" 确认，"dismiss" 取消。prompt 类型用 promptText 填入文本。' },
-  { name: 'computer', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['left_click','right_click','double_click','triple_click','type','screenshot','screenshot_element','wait','scroll','scroll_to','key','left_click_drag','hover','zoom'] }, coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, start_coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, ref: { type: 'string' }, text: { type: 'string' }, scroll_direction: { type: 'string', enum: ['up','down','left','right'] }, scroll_amount: { type: 'number', minimum: 1, maximum: 10 }, quality: { type: 'string', enum: ['low','medium','high'] }, duration: { type: 'number', minimum: 0, maximum: 10 }, region: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 }, modifiers: { type: 'string' }, repeat: { type: 'number', minimum: 1, maximum: 100 }, tabId: { type: 'number' } }, required: ['action'] }, description: '鼠标/键盘/截图交互。ref 精确定位（来自 read_page），coordinate 像素坐标。type 逐字符输入带 20ms 延迟模拟人类。' },
+  { name: 'computer', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['left_click','right_click','double_click','triple_click','type','screenshot','screenshot_element','wait','scroll','scroll_to','key','left_click_drag','hover','zoom'] }, coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, start_coordinate: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }, ref: { type: 'string' }, text: { type: 'string' }, scroll_direction: { type: 'string', enum: ['up','down','left','right'] }, scroll_amount: { type: 'number', minimum: 1, maximum: 10 }, quality: { type: 'string', enum: ['low','medium','high'] }, duration: { type: 'number', minimum: 0, maximum: 10 }, region: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 }, modifiers: { type: 'string' }, repeat: { type: 'number', minimum: 1, maximum: 100 }, verify: { type: 'boolean' }, tabId: { type: 'number' } }, required: ['action'] }, description: '鼠标/键盘/截图交互。ref 精确定位（来自 read_page），coordinate 像素坐标。type 逐字符输入带 20ms 延迟模拟人类。点击/按键默认自动校验页面是否发生变化（verify=false 关闭）。' },
   { name: 'form_input', inputSchema: { type: 'object', properties: { ref: { type: 'string' }, value: { type: ['string','boolean','number'] }, fields: { type: 'array', items: { type: 'object', properties: { ref: { type: 'string' }, value: { type: ['string','boolean','number'] } }, required: ['ref','value'] } }, tabId: { type: 'number' } } }, description: '设置表单字段值（单个或批量）。单字段用 ref+value，批量用 fields: [{ref, value}, ...]。React/Vue 受控组件兼容。' },
   { name: 'get_page_text', inputSchema: { type: 'object', properties: { max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, tabId: { type: 'number' } } }, description: '提取页面全部纯文本（textContent）。最完整，不会漏内容，但丢失结构。适合社交媒体、复杂 SPA。' },
   { name: 'get_page_markdown', inputSchema: { type: 'object', properties: { max_chars: { type: 'integer', minimum: 1000, maximum: 200000 }, tabId: { type: 'number' } } }, description: '提取页面为结构化 Markdown — 标题(#)、链接、代码块、表格、图片。过滤 <50px 装饰图标。适合博客、文档、产品页。漏内容时回退到 get_page_text。' },
@@ -32,6 +34,7 @@ const TOOL_DEFINITIONS = [
   { name: 'tabs_create', inputSchema: { type: 'object', properties: {} }, description: '创建新的空白标签页。' },
   { name: 'read_console_messages', inputSchema: { type: 'object', properties: { tabId: { type: 'number' }, onlyErrors: { type: 'boolean' }, pattern: { type: 'string' }, clear: { type: 'boolean' }, limit: { type: 'integer' } }, required: ['tabId'] }, description: '读取浏览器控制台消息。' },
   { name: 'read_network_requests', inputSchema: { type: 'object', properties: { tabId: { type: 'number' }, urlPattern: { type: 'string' }, clear: { type: 'boolean' }, limit: { type: 'integer' } }, required: ['tabId'] }, description: '读取 HTTP 网络请求。' },
+  { name: 'health_check', inputSchema: { type: 'object', properties: {} }, description: '端到端链路体检：MCP server → WebSocket → 扩展 → CDP，逐跳报告状态。工具调用异常时先用它定位是哪一跳断了。' },
 ];
 
 // === HELPERS ===
@@ -173,6 +176,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   state.screenshotContexts.delete(tabId);
   state.tabEventBuffers.delete(tabId);
   state.pendingDialogs.delete(tabId);
+  state.snapshots.delete(tabId);
 });
 
 chrome.debugger.onDetach.addListener((s) => {
@@ -182,6 +186,7 @@ chrome.debugger.onDetach.addListener((s) => {
     state.screenshotContexts.delete(s.tabId);
     state.tabEventBuffers.delete(s.tabId);
     state.pendingDialogs.delete(s.tabId);
+    state.snapshots.delete(s.tabId);
   }
 });
 
@@ -271,7 +276,7 @@ async function executeTool(toolName, args) {
   const handler = TOOL_HANDLERS[toolName];
   if (!handler) return { error: { code: 'UNKNOWN_TOOL', message: `Unknown tool: ${toolName}` } };
   let tabId = args?.tabId;
-  if (!tabId && !['tabs_context', 'tabs_create'].includes(toolName)) {
+  if (!tabId && !['tabs_context', 'tabs_create', 'health_check'].includes(toolName)) {
     tabId = await getActiveTabId();
   }
   return handler(tabId, args || {});
@@ -315,19 +320,61 @@ async function waitForLoad(tabId, ms) {
 }
 
 // === READ PAGE ===
+// Tree lines are keyed by ref (stable per element via WeakRef map), so a
+// ref-level set difference approximates a semantic diff: same element + same
+// line ⇒ unchanged, even when its position in the tree shifted.
+function indexTree(tree) {
+  const byRef = new Map();
+  for (const line of String(tree || '').split('\n')) {
+    const m = line.match(/\[(ref_\d+)\]/);
+    if (m) byRef.set(m[1], line);
+  }
+  return byRef;
+}
+
+function computeDiff(prevTree, curTree, maxLines = 60) {
+  const prev = indexTree(prevTree), cur = indexTree(curTree);
+  const added = [], removed = [], changed = [];
+  for (const [ref, line] of cur) {
+    if (!prev.has(ref)) added.push(line);
+    else if (prev.get(ref) !== line) changed.push(line);
+  }
+  for (const [ref, line] of prev) if (!cur.has(ref)) removed.push(line);
+
+  const total = added.length + removed.length + changed.length;
+  if (total === 0) {
+    return { text: 'No changes since last snapshot — the page looks identical.', total: 0, added: 0, removed: 0, changed: 0 };
+  }
+
+  const out = [`## Changes since last snapshot (+${added.length} -${removed.length} ~${changed.length})`];
+  let shown = 0;
+  const push = (mark, lines) => {
+    for (const l of lines) {
+      if (shown >= maxLines) return;
+      out.push(`${mark} ${l}`);
+      shown++;
+    }
+  };
+  push('+', added); push('-', removed); push('~', changed);
+  if (total > shown) out.push(`… ${total - shown} more changed lines not shown`);
+  return { text: out.join('\n'), total, added: added.length, removed: removed.length, changed: changed.length };
+}
+
 async function handleReadPage(tabId, args) {
   await ensureContentScripts(tabId);
+  const prev = state.snapshots.get(tabId);
   const r = await callContentScript(tabId,
-    (filter, maxDepth, maxChars, refId) => {
+    (filter, maxDepth, maxChars, refId, keywords) => {
       const tree = globalThis.__ccAccessibilityTree;
       if (!tree) return { error: 'not available' };
-      const result = tree.generate(filter || 'interactive', maxDepth, maxChars || 50000, refId || null);
+      const result = tree.generate(filter || 'interactive', maxDepth, maxChars || 50000, refId || null, keywords || null);
       result.readyState = document.readyState;
       return result;
     },
-    [args.filter || 'interactive', args.depth ?? 15, args.max_chars || 50000, args.ref_id || null]
+    [args.filter || 'interactive', args.depth ?? 15, args.max_chars || 50000, args.ref_id || null, args.keywords || null]
   );
   if (r?.error) return { content: [{ type: 'text', text: String(r.error) }], isError: true };
+
   const ts = `[Snapshot at ${new Date().toISOString()}]\n`;
   const dialog = state.pendingDialogs.get(tabId);
   let dialogWarn = '';
@@ -353,7 +400,26 @@ async function handleReadPage(tabId, args) {
     }
   }
 
-  return { content: [{ type: 'text', text: dialogWarn + stateHeader + ts + diagnostics + r.tree }] };
+  let bodyText;
+  const partialView = !!(args.keywords || args.ref_id);
+  if (args.diff) {
+    if (!prev) {
+      bodyText = '[diff requested but no previous snapshot for this tab — returning full tree]\n\n' + r.tree;
+    } else if (partialView) {
+      bodyText = '[diff requested together with keywords/ref_id — a partial view can\'t be diffed against a full snapshot; returning full tree]\n\n' + r.tree;
+    } else {
+      const d = computeDiff(prev.tree, r.tree);
+      bodyText = `(diff vs snapshot from ${new Date(prev.ts).toISOString()})\n\n${d.text}`;
+    }
+  } else {
+    bodyText = r.tree;
+  }
+
+  // Only unfiltered reads become a diff baseline — a keyword/ref_id read is a
+  // partial view, and diffing a full tree against it would report every other
+  // element as newly added.
+  if (!partialView) state.snapshots.set(tabId, { tree: r.tree, ts: Date.now() });
+  return { content: [{ type: 'text', text: dialogWarn + stateHeader + ts + diagnostics + bodyText }] };
 }
 
 // === FIND ===
@@ -371,7 +437,107 @@ async function handleFind(tabId, args) {
 }
 
 // === COMPUTER (click, type, key, screenshot, scroll, etc.) ===
+
+// --- Post-action verification -------------------------------------------------
+// Long-horizon agents fail by compounding unverified steps: a click that silently
+// misses still "succeeds" and the next three actions build on a false premise.
+// Every mutating action therefore reports whether the page actually moved.
+const VERIFY_SETTLE_MS = 1200;
+const VERIFY_POLL_MS = 150;
+const VERIFY_ACTIONS = new Set(['left_click', 'right_click', 'double_click', 'triple_click', 'type', 'key']);
+
+async function getSignature(tabId) {
+  try {
+    await ensureContentScripts(tabId);
+    const r = await callContentScript(tabId, () => globalThis.__ccAccessibilityTree?.signature() || null, []);
+    if (r?.sig) return r;
+  } catch {}
+  // Content script unreachable (e.g. mid-navigation) — url/title still tell us a lot.
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return { sig: null, url: tab.url || '', title: tab.title || '', count: 0, interactive: 0 };
+  } catch { return null; }
+}
+
+// Pages with live counters, video timers or rotating ads change on their own, which
+// would make every action look successful. Sample twice to detect that, so we can
+// say "can't tell" instead of falsely confirming.
+async function getBaselineSignature(tabId) {
+  const a = await getSignature(tabId);
+  await sleep(180);
+  const b = await getSignature(tabId);
+  if (!b) return a;
+  if (a?.sig && b.sig && a.sig !== b.sig) return { ...b, noisy: true };
+  return b;
+}
+
+async function verifyAction(tabId, before) {
+  if (!before) return null;
+  const start = Date.now();
+  let after = null;
+  while (Date.now() - start < VERIFY_SETTLE_MS) {
+    await sleep(VERIFY_POLL_MS);
+    after = await getSignature(tabId);
+    if (after && (after.sig !== before.sig || after.url !== before.url || after.title !== before.title)) break;
+  }
+  if (!after) return '[verify] Could not read page state after the action — the tab may have closed.';
+
+  const urlChanged = after.url !== before.url;
+  const titleChanged = after.title !== before.title;
+  const domChanged = after.sig !== before.sig;
+
+  if (!urlChanged && !titleChanged && !domChanged) {
+    return `[verify] ⚠️ No detectable change after ${Date.now() - start}ms. The click may have missed, hit a disabled or covered element, or the effect is visual-only. Re-read the page before the next step.`;
+  }
+
+  const noise = before.noisy
+    ? ' [note: page changes on its own, so this signal is unreliable here]'
+    : '';
+
+  const parts = [];
+  if (urlChanged) parts.push(`url → ${after.url}`);
+  if (titleChanged) parts.push(`title → "${after.title}"`);
+  if (domChanged) parts.push(`DOM changed (elements ${before.count} → ${after.count}, interactive ${before.interactive} → ${after.interactive})`);
+
+  let detail = '';
+  const prev = state.snapshots.get(tabId);
+  if (prev && domChanged) {
+    try {
+      await ensureContentScripts(tabId);
+      const cur = await callContentScript(tabId,
+        (filter, maxDepth, maxChars) => {
+          const t = globalThis.__ccAccessibilityTree;
+          return t ? t.generate(filter, maxDepth, maxChars, null, null) : { error: 'not available' };
+        },
+        ['interactive', 15, 50000]
+      );
+      if (cur?.tree && !cur.error) {
+        const d = computeDiff(prev.tree, cur.tree, 25);
+        if (d.total > 0) detail = '\n' + d.text;
+        state.snapshots.set(tabId, { tree: cur.tree, ts: Date.now() });
+      }
+    } catch {}
+  }
+
+  return `[verify] ✓ Page changed: ${parts.join('; ')}.${noise}${detail}`;
+}
+
 async function handleComputer(tabId, args) {
+  const shouldVerify = args.verify !== false && VERIFY_ACTIONS.has(args.action);
+  const before = shouldVerify ? await getBaselineSignature(tabId) : null;
+
+  const result = await dispatchComputer(tabId, args);
+
+  if (shouldVerify && !result.error) {
+    const note = await verifyAction(tabId, before);
+    const first = result.content?.[0];
+    if (note && first?.type === 'text') first.text += `\n\n${note}`;
+    else if (note) result.content = [{ type: 'text', text: note }, ...(result.content || [])];
+  }
+  return result;
+}
+
+async function dispatchComputer(tabId, args) {
   const act = args.action;
   if (['left_click','right_click','double_click','triple_click'].includes(act)) {
     return handleClick(tabId, { ...args, action: act === 'hover' ? 'left_click' : act });
@@ -480,31 +646,34 @@ async function handleHover(tabId, args) {
   return { content: [{ type: 'text', text: `Hovered at (${Math.round(x)},${Math.round(y)})` }] };
 }
 
-// Type
+// Type — batches contiguous text runs into a single Input.insertText call.
+// Per-character dispatchKeyEvent was ~3 CDP calls + 20ms per char; insertText
+// does the whole run in one call (~10× faster) and handles CJK/IME reliably.
 async function handleType(tabId, args) {
   await ensureAttached(tabId);
   const text = args.text || '';
-  if (/[^\x00-\x7F]/.test(text)) {
-    for (const ch of text) {
-      if (state.stopRequested) break;
-      if (ch === '\n' || ch === '\r') { await keyEventSimple(tabId, 'Enter', 13); }
-      else if (ch === '\t') { await keyEventSimple(tabId, 'Tab', 9); }
-      else { await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: ch }); }
-      await sleep(10 + Math.random() * 20);
-    }
-    return { content: [{ type: 'text', text: `Typed ${text.length} characters (mixed charset)` }] };
-  }
+  if (!text) return { content: [{ type: 'text', text: 'Typed 0 characters' }] };
+
+  // Split into runs: newline/tab stay real key events, everything else batches.
+  // Regular runs never contain '\n' or '\t', so those chars act as safe sentinels.
+  const runs = [];
+  let run = '';
   for (const ch of text) {
-    if (state.stopRequested) break;
-    if (ch === '\t') { await keyEventSimple(tabId, 'Tab', 9); }
-    else if (ch === '\n' || ch === '\r') { await keyEventSimple(tabId, 'Enter', 13); }
-    else {
-      const code = ch.charCodeAt(0);
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'keyDown', key: ch, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'char', key: ch, text: ch, unmodifiedText: ch, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'keyUp', key: ch, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    if (ch === '\n' || ch === '\r' || ch === '\t') {
+      if (run) { runs.push(run); run = ''; }
+      runs.push(ch === '\t' ? '\t' : '\n');
+    } else {
+      run += ch;
     }
-    await sleep(20);
+  }
+  if (run) runs.push(run);
+
+  for (const r of runs) {
+    if (state.stopRequested) break;
+    if (r === '\n') { await keyEventSimple(tabId, 'Enter', 13); }
+    else if (r === '\t') { await keyEventSimple(tabId, 'Tab', 9); }
+    else { await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: r }); }
+    await sleep(5);
   }
   return { content: [{ type: 'text', text: `Typed ${text.length} characters` }] };
 }
@@ -647,38 +816,96 @@ async function handleScroll(tabId, args) {
 async function handleFormInput(tabId, args) {
   await ensureContentScripts(tabId);
 
+  async function fillOne(ref, value) {
+    if (!ref) return { ok: false, msg: '(skipped: missing ref)' };
+    const r = await callContentScript(tabId,
+      (ref, value) => {
+        const bridge = globalThis.__ccBridge;
+        return bridge ? bridge.fillForm(ref, value) : { success: false, error: 'not available' };
+      },
+      [ref, value]
+    );
+    // file input → CDP upload path (JS can't set value on file inputs)
+    if (r?.fileInput) {
+      const u = await handleFileUpload(tabId, ref, value);
+      return u.success
+        ? { ok: true, msg: `${ref} (file): ${value}` }
+        : { ok: false, msg: `${ref} (file): ${u.error || 'upload failed'}` };
+    }
+    if (r?.success) return { ok: true, msg: `${r.fieldName}: OK` };
+    return { ok: false, msg: `${ref}: ${r?.error || 'failed'}` };
+  }
+
   // Batch mode: fill multiple fields in one call
   if (args.fields && Array.isArray(args.fields)) {
     const results = [];
     for (const f of args.fields) {
-      if (!f.ref) { results.push('(skipped: missing ref)'); continue; }
-      try {
-        const r = await callContentScript(tabId,
-          (ref, value) => {
-            const bridge = globalThis.__ccBridge;
-            return bridge ? bridge.fillForm(ref, value) : { success: false, error: 'not available' };
-          },
-          [f.ref, f.value]
-        );
-        results.push(r?.success ? `${r.fieldName}: OK` : `${f.ref}: ${r?.error || 'failed'}`);
-      } catch (e) {
-        results.push(`${f.ref}: ${e.message}`);
-      }
+      try { results.push((await fillOne(f.ref, f.value)).msg); }
+      catch (e) { results.push(`${f.ref}: ${e.message}`); }
     }
     return { content: [{ type: 'text', text: results.join('\n') }] };
   }
 
   // Single mode (backward compatible)
   if (!args.ref) return { error: { code: 'BAD_REQUEST', message: 'Missing ref for single mode (use fields array for batch)' } };
-  const r = await callContentScript(tabId,
-    (ref, value) => {
-      const bridge = globalThis.__ccBridge;
-      return bridge ? bridge.fillForm(ref, value) : { success: false, error: 'not available' };
-    },
-    [args.ref, args.value]
-  );
-  if (!r?.success) return { content: [{ type: 'text', text: `Error: ${r?.error || 'failed'}` }], isError: true };
-  return { content: [{ type: 'text', text: `Form field "${r.fieldName}" set` }] };
+  let out;
+  try { out = await fillOne(args.ref, args.value); }
+  catch (e) { return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true }; }
+  return out.ok
+    ? { content: [{ type: 'text', text: out.msg }] }
+    : { content: [{ type: 'text', text: out.msg }], isError: true };
+}
+
+// File upload — CDP DOM.setFileInputFiles feeds a local path to a file input.
+// JS cannot set <input type=file> value directly (browser security); this
+// bypasses that and fires the native input/change events the page expects.
+async function handleFileUpload(tabId, ref, value) {
+  await ensureAttached(tabId);
+  const path = String(value);
+  try {
+    await chrome.debugger.sendCommand({ tabId }, 'DOM.enable');
+    const { root } = await chrome.debugger.sendCommand({ tabId }, 'DOM.getDocument', { depth: 1, pierce: true });
+    let target = null; // { nodeId } or { backendNodeId }
+
+    // Prefer the exact element via its ref coordinates when it's visible.
+    const [vis] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (r) => {
+        const el = globalThis.__ccAccessibilityTree?.getElementByRef(r);
+        if (!el) return null;
+        return { visible: el.offsetWidth > 0 && el.offsetHeight > 0 };
+      },
+      args: [ref]
+    });
+    if (vis?.result?.visible) {
+      const [coord] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (r) => globalThis.__ccAccessibilityTree?.getElementCoordinates(r, { scrollIntoView: true }) || null,
+        args: [ref]
+      });
+      if (coord?.result) {
+        const byLoc = await chrome.debugger.sendCommand({ tabId }, 'DOM.getNodeForLocation', {
+          x: Math.round(coord.result.x), y: Math.round(coord.result.y)
+        });
+        if (byLoc.nodeId) target = { nodeId: byLoc.nodeId };
+        else if (byLoc.backendNodeId) target = { backendNodeId: byLoc.backendNodeId };
+      }
+    }
+
+    // Hidden inputs (styled upload buttons) have no rect — fall back to first file input.
+    if (!target) {
+      const qr = await chrome.debugger.sendCommand({ tabId }, 'DOM.querySelector', {
+        nodeId: root.nodeId, selector: 'input[type="file"]'
+      });
+      if (qr.nodeId) target = { nodeId: qr.nodeId };
+    }
+
+    if (!target) return { success: false, error: 'File input not found' };
+    await chrome.debugger.sendCommand({ tabId }, 'DOM.setFileInputFiles', { ...target, files: [path] });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message || String(e) };
+  }
 }
 
 // === GET PAGE TEXT ===
@@ -869,6 +1096,82 @@ async function handleWaitFor(tabId, args) {
   return { content: [{ type: 'text', text: `Timeout after ${timeout}ms waiting for ${target}` }], isError: true };
 }
 
+// === HEALTH CHECK ===
+// Walks the chain hop by hop. `claude mcp list` probes a fresh process and can
+// report "Connected" while this session's extension link is dead — this does not.
+// Not every page accepts injection (Edge's new-tab page, the extensions gallery).
+// Probing one of those says nothing about whether the chain works, so we look for
+// a scriptable tab instead of reporting a false failure.
+function isScriptable(url) {
+  if (!url) return false;
+  if (BLOCKED_URLS.some(p => url.startsWith(p))) return false;
+  if (/^https?:\/\/ntp\.msn\.com\/edge\/ntp/.test(url)) return false;
+  if (/^https?:\/\/[^/]*newtab/.test(url)) return false;
+  return /^https?:/.test(url);
+}
+
+async function handleHealth(_tabId, _args) {
+  const lines = [];
+  lines.push(`Extension uptime: ${Math.round((Date.now() - state.startedAt) / 1000)}s`);
+  lines.push(`Hop 1 · extension → MCP server WebSocket: ${state.connected ? `OK (port ${state.wsPort})` : 'DISCONNECTED'}`);
+  lines.push(`CDP sessions held: ${state.attachedTabs.size ? [...state.attachedTabs].join(', ') : 'none'}`);
+  if (state.commandQueue.length) {
+    lines.push(`⚠️ Command queue backlog: ${state.commandQueue.length} waiting — a prior tool call may be stuck`);
+  }
+
+  let tab = null;
+  try {
+    const active = await chrome.tabs.get(await getActiveTabId());
+    tab = active;
+    if (!isScriptable(active.url)) {
+      const all = await chrome.tabs.query({});
+      const alt = all.find(t => t.id !== active.id && isScriptable(t.url));
+      if (alt) {
+        tab = alt;
+        lines.push(`Hop 2 · active tab [#${active.id}] is not scriptable — probed [#${alt.id}] instead`);
+      } else {
+        tab = null;
+        lines.push(`Hop 2 · active tab [#${active.id}] is not scriptable and no other http(s) tab is open — cannot probe further`);
+      }
+    }
+  } catch (e) {
+    lines.push(`Hop 2 · active tab: FAILED (${e.message})`);
+  }
+  if (tab) lines.push(`Hop 2 · probed tab: OK — [#${tab.id}] ${tab.title || '(no title)'} — ${tab.url || ''}`);
+
+  if (tab) {
+    try {
+      await ensureContentScripts(tab.id);
+      const r = await callContentScript(tab.id, () => ({
+        title: document.title,
+        ready: document.readyState,
+        treeReady: !!globalThis.__ccAccessibilityTree
+      }), []);
+      lines.push(r?.treeReady
+        ? `Hop 3 · content script: OK (readyState=${r.ready}, title="${String(r.title).slice(0, 60)}")`
+        : 'Hop 3 · content script: FAILED (injected but __ccAccessibilityTree missing)');
+    } catch (e) {
+      lines.push(`Hop 3 · content script: FAILED (${e.message})`);
+    }
+
+    if (state.attachedTabs.has(tab.id)) {
+      try {
+        const r = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Runtime.evaluate', { expression: '1+1', returnByValue: true });
+        lines.push(r?.result?.value === 2 ? 'Hop 4 · CDP: OK' : 'Hop 4 · CDP: unexpected result');
+      } catch (e) {
+        lines.push(`Hop 4 · CDP: FAILED (${e.message})`);
+      }
+    } else {
+      lines.push('Hop 4 · CDP: not attached to this tab yet (attaches on first use — not probed to avoid the debugger banner)');
+    }
+  }
+
+  if (state.pendingDialogs.size) {
+    lines.push(`⚠️ Native dialog open on tab(s): ${[...state.pendingDialogs.keys()].join(', ')}`);
+  }
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
 // === TOOL HANDLERS ===
 const TOOL_HANDLERS = {
   navigate: handleNavigate,
@@ -885,6 +1188,7 @@ const TOOL_HANDLERS = {
   tabs_create: handleTabsCreate,
   read_console_messages: handleReadConsole,
   read_network_requests: handleReadNetwork,
+  health_check: handleHealth,
 };
 
 // === POPUP MESSAGES ===
