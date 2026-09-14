@@ -27,11 +27,11 @@ Startup:
 1. Load the Extension in Edge/Chrome (developer mode)
 2. Claude Code auto-launches MCP Server via MCP config
 3. Extension connects to MCP Server via WebSocket
-4. 14 browser tools are registered
+4. 15 browser tools are registered
 
 ---
 
-## 14 Tools
+## 15 Tools
 
 ### Navigation
 | Tool | Parameters | Description |
@@ -41,14 +41,14 @@ Startup:
 ### Page Reading
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `read_page` | `filter?`, `depth?`, `max_chars?`, `ref_id?`, `tabId?` | Accessibility element tree with ref IDs. `filter="interactive"` for interactive elements only (token-efficient), `"all"` for everything. Includes live diagnostics (console errors, failed network requests) and pending dialog warnings |
+| `read_page` | `filter?`, `depth?`, `max_chars?`, `ref_id?`, `keywords?`, `diff?`, `tabId?` | Accessibility element tree with ref IDs. `filter="interactive"` for interactive elements only (token-efficient), `"all"` for everything. `keywords` emits only matching elements. `diff=true` returns only what changed since the last full read — compared per-ref, so an element that merely moved is not a change. Filtered reads are not stored as a baseline. Includes live diagnostics (console errors, failed network requests) and pending dialog warnings |
 | `find` | `query`, `max_results?`, `tabId?` | Search elements by keyword across text/aria-label/title/role. Multi-term scoring, returns ref list |
 | `wait_for` | `selector?`, `text?`, `timeout?`, `tabId?` | Wait for element or text to appear. Selector uses CSS visibility check, text matches page content. Default 10s timeout, 300ms poll interval |
 
 ### Interaction
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `computer` | `action` (+ 12 optional params) | Mouse/keyboard/screenshot/scroll. Actions: `left_click`, `right_click`, `double_click`, `triple_click`, `type`, `screenshot`, `screenshot_element`, `wait`, `scroll`, `scroll_to`, `key`, `left_click_drag`, `hover`, `zoom`. Click via `ref` (precise) or `coordinate` (pixel). Type: ASCII per-character key events + 20ms delay, Chinese via `Input.insertText` + random 10-30ms delay |
+| `computer` | `action` (+ 13 optional params) | Mouse/keyboard/screenshot/scroll. Actions: `left_click`, `right_click`, `double_click`, `triple_click`, `type`, `screenshot`, `screenshot_element`, `wait`, `scroll`, `scroll_to`, `key`, `left_click_drag`, `hover`, `zoom`. Click via `ref` (precise) or `coordinate` (pixel). Type batches contiguous runs into a single `Input.insertText` call (newlines/tabs stay real key events). **Click/key press verify the page actually changed** and warn when nothing did (`verify: false` to disable); a two-sample baseline detects self-updating pages and reports the signal as unreliable rather than falsely confirming |
 | `form_input` | `ref`+`value` or `fields[]`, `tabId?` | Fill form fields single or batch (`fields: [{ref, value}]`). React/Vue controlled-component compatible via prototype setter. Checkbox accepts boolean |
 
 ### Content Extraction
@@ -60,6 +60,7 @@ Startup:
 ### JS & Debugging
 | Tool | Parameters | Description |
 |------|-----------|-------------|
+| `health_check` | — | Walk the chain hop by hop (MCP server → WebSocket → extension → content script → CDP) and report each one. Falls back to another tab when the active one can't be scripted. Use it first when a tool call misbehaves |
 | `javascript_tool` | `text`, `tabId?` | Execute JS in the page. 100K char limit. Double eval wrapping for expression/statement compatibility. CDP fallback if scripting.executeScript fails |
 | `read_console_messages` | `tabId`, `onlyErrors?`, `pattern?`, `clear?`, `limit?` | Read console messages. Supports regex pattern filtering |
 | `read_network_requests` | `tabId`, `urlPattern?`, `clear?`, `limit?` | Read HTTP network requests with status codes |
@@ -309,8 +310,8 @@ Tools are executed in strict FIFO order per extension instance. Each tool has a 
 | **MV3 SW idle kill** — Chrome may kill Service Worker after ~30s idle | Mitigated: dual keepalive (interval + alarms) | Rare: reconnect adds 1-2s delay |
 | **Screenshot quality loop** — iterative linear degradation (not binary search) | Open | Low: 1-2 extra CDP calls |
 | **waitForLoad polling** — 100ms interval until `status=complete` | Open | Low: may miss SPA navigations |
-| **No end-to-end health check** — MCP shows "Connected" even if extension dropped | Open | Medium: tool call timeouts |
-| **Content scripts injected serially** — 4 separate executeScript calls | Open | Low: ~200ms perceived delay |
+| **No end-to-end health check** — MCP shows "Connected" even if extension dropped | Fixed: `health_check` tool walks every hop and reports which one broke | — |
+| **Content scripts injected serially** — 4 separate executeScript calls | Fixed: all four files go in one `executeScript` call via a `files` array (a separate cheap probe call checks whether they are already present) | — |
 | **Lid closed + battery** — Chrome suspends CDP on battery sleep | Known limitation | Unusable |
 | **Hover → click bug** — historical; fixed (hover now sends mouseMoved only) | Fixed | — |
 

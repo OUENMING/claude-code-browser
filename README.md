@@ -64,7 +64,7 @@ Claude Code ←──stdio──→ MCP Server (index.js) ←──ws:127.0.0.1:
 1. Edge/Chrome 加载 Extension（开发者模式）
 2. Claude Code 自动拉起 MCP Server
 3. Extension 通过 WebSocket 连接 MCP Server
-4. 14 个浏览器工具自动注册
+4. 15 个浏览器工具自动注册
 
 ## 项目结构
 
@@ -117,7 +117,7 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 
 ## 使用说明
 
-### 14 个工具一览
+### 15 个工具一览
 
 #### 导航
 | 工具 | 参数 | 说明 |
@@ -127,14 +127,14 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 #### 页面读取
 | 工具 | 参数 | 说明 |
 |------|------|------|
-| `read_page` | `filter?`, `depth?`, `max_chars?`, `tabId?` | 可访问性元素树，带 `[ref_N]` 标识符。`filter="interactive"` 仅交互元素（省 token），`"all"` 全部 |
+| `read_page` | `filter?`, `depth?`, `max_chars?`, `ref_id?`, `keywords?`, `diff?`, `tabId?` | 可访问性元素树，带 `[ref_N]` 标识符。`filter="interactive"` 仅交互元素（省 token），`"all"` 全部。`keywords` 空格分隔只输出匹配元素。`diff=true` 只返回相对上次快照的变化 |
 | `find` | `query`, `max_results?`, `tabId?` | 按关键词搜索元素，多词打分排序，返回 ref 列表 |
 | `wait_for` | `selector?`, `text?`, `timeout?`, `tabId?` | 等待元素或文本出现。默认 10s 超时，300ms 轮询 |
 
 #### 交互
 | 工具 | 参数 | 说明 |
 |------|------|------|
-| `computer` | `action` + 12 个可选参数 | 鼠标/键盘/截图/滚动。动作：`left_click`, `right_click`, `double_click`, `type`, `screenshot`, `scroll`, `key`, `hover` 等。中文用 `Input.insertText` + 随机 10-30ms |
+| `computer` | `action` + 13 个可选参数 | 鼠标/键盘/截图/滚动。动作：`left_click`, `right_click`, `double_click`, `type`, `screenshot`, `scroll`, `key`, `hover` 等。文本用 `Input.insertText` 按段批量输入。**点击/按键默认自动校验页面是否变化**，没变化会警告（`verify: false` 关闭） |
 | `form_input` | `ref`+`value` 或 `fields[]`, `tabId?` | 设置表单字段值（单个或批量）。React/Vue 受控组件兼容。checkbox 接受 boolean |
 
 #### 内容提取
@@ -146,6 +146,7 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 #### JS & 调试
 | 工具 | 参数 | 说明 |
 |------|------|------|
+| `health_check` | — | 端到端链路体检：MCP server → WebSocket → 扩展 → 内容脚本 → CDP，逐跳报告状态。工具报错时先用它定位断在哪一跳 |
 | `javascript_tool` | `text`, `tabId?` | 在页面执行 JS。10 万字符限制，scripting.executeScript 失败时 CDP 兜底 |
 | `read_console_messages` | `tabId`, `onlyErrors?`, `pattern?`, `limit?` | 读取控制台消息。支持正则匹配 |
 | `read_network_requests` | `tabId`, `urlPattern?`, `limit?` | 读取 HTTP 网络请求及状态码 |
@@ -273,7 +274,7 @@ node index.js
 
 - [ ] FIFO 队列改为并发队列
 - [ ] 截图降质算法优化（二分法替代线性递减）
-- [ ] 端到端健康检查机制
+- [x] 端到端健康检查机制（`health_check` 工具，逐跳报告）
 
 ## License
 
