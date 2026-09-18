@@ -9,7 +9,7 @@
   <a href="README.md"><img src="https://img.shields.io/badge/Lang-简体中文-lightgrey?style=flat-square" alt="简体中文"></a>
 </p>
 
-Claude Code Browser Automation lets Claude Code control your real browser — navigate, click, type, fill forms, take screenshots, extract content — all through natural language. Bypasses anti-bot detection by using a real browser fingerprint and CDP synthetic input.
+Claude Code Browser Automation lets Claude Code control your real browser through natural language — navigate, click, type, fill forms, screenshot, extract content. A real browser fingerprint plus CDP synthetic input gets past anti-bot detection.
 
 ---
 
@@ -26,8 +26,8 @@ Claude Code ←──stdio──→ MCP Server (index.js) ←──ws:127.0.0.1:
 Startup:
 1. Load the Extension in Edge/Chrome (developer mode)
 2. Claude Code auto-launches MCP Server via MCP config
-3. Extension connects to MCP Server via WebSocket
-4. 15 browser tools are registered
+3. Extension connects to MCP Server over WebSocket
+4. All 15 browser tools are registered
 
 ---
 
@@ -49,7 +49,7 @@ Startup:
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `computer` | `action` (+ 13 optional params) | Mouse/keyboard/screenshot/scroll. Actions: `left_click`, `right_click`, `double_click`, `triple_click`, `type`, `screenshot`, `screenshot_element`, `wait`, `scroll`, `scroll_to`, `key`, `left_click_drag`, `hover`, `zoom`. Click via `ref` (precise) or `coordinate` (pixel). Type batches contiguous runs into a single `Input.insertText` call (newlines/tabs stay real key events). **Click/key press verify the page actually changed** and warn when nothing did (`verify: false` to disable); a two-sample baseline detects self-updating pages and reports the signal as unreliable rather than falsely confirming |
-| `form_input` | `ref`+`value` or `fields[]`, `tabId?` | Fill form fields single or batch (`fields: [{ref, value}]`). React/Vue controlled-component compatible via prototype setter. Checkbox accepts boolean |
+| `form_input` | `ref`+`value` or `fields[]`, `tabId?` | Fill form fields single or batch (`fields: [{ref, value}]`). React/Vue controlled-component compatible via prototype setter. Checkbox accepts boolean. File inputs are handled through CDP `DOM.setFileInputFiles`, so `value` must be an absolute path on the machine running the MCP server |
 
 ### Content Extraction
 | Tool | Parameters | Description |
@@ -94,18 +94,18 @@ Startup:
 
 ### Dual-mode architecture
 
-The server has two modes, determined at startup:
+Startup decides the mode:
 
 **Server mode** (port 19222 free):
 - Listens on `ws://127.0.0.1:19222`
-- Accepts both Extension and client MCP connections
-- Role determined by first message — `extension_info` (type: "extension_info") vs tool call (type: "tool_call")
-- Multi-client support: `routeTable` maps request IDs to client WebSocket connections, replies from extension are forwarded to the correct client
-- PID file at `/tmp/claude-browser-mcp.pid` with stale-process cleanup
+- Accepts Extension and client MCP connections
+- Role comes from the first message — `extension_info` vs a tool call (`type: "tool_call"`)
+- Multi-client: `routeTable` maps request IDs to client WebSockets, so extension replies go back to the right client
+- PID file at `/tmp/claude-browser-mcp.pid`, stale-process cleanup
 
-**Client mode** (port already taken):
+**Client mode** (port taken):
 - Connects as a client to the existing server
-- Reconnects with exponential backoff (500ms × retries, 10 max)
+- Reconnect every 500ms, up to 10 attempts
 - All tool calls routed through the shared server
 
 ### Extension communication
@@ -133,7 +133,7 @@ callExtension(tool, args):
 ### Service Worker lifecycle
 
 - **Dual keepalive**: `setInterval` 25s (chrome.storage.local write) + `chrome.alarms` 0.5min (wakes SW from idle)
-- **State persistence**: Every 15s, saves `{tabId, consoleEvents, networkEvents}` to `chrome.storage.session` for SW crash recovery
+- **State persistence**: every 15s writes `{tabId, consoleEvents, networkEvents}` to `chrome.storage.session` for SW crash recovery
 - **On init**: restores persisted tab state, re-attaches CDP, restores event buffers
 
 ### WebSocket management
@@ -145,7 +145,7 @@ callExtension(tool, args):
 
 ### FIFO command queue
 
-Tools are executed in strict FIFO order per extension instance. Each tool has a 5-second slow-tool warning. `stopRequested` flag allows mid-execution abort via popup button.
+Strict FIFO order per extension instance. Each tool gets a 5-second slow-tool warning. `stopRequested` allows mid-execution abort from the popup.
 
 ### CDP management
 
@@ -158,63 +158,62 @@ Tools are executed in strict FIFO order per extension instance. Each tool has a 
 
 ### Popup (`popup.html` / `popup.js`)
 
-- Connection status indicator (Connected/Disconnected)
-- Current tab info display
-- Configurable WebSocket port (saved to chrome.storage.local)
+- Connection status (Connected/Disconnected)
+- Current tab info
+- Configurable WebSocket port (persisted to chrome.storage.local)
 - "Disconnect tab" button (detaches all CDP sessions)
-- Port config persistence
 
 ### Content Scripts
 
-**`accessibility-tree.js`** — Element mapping system:
-- WeakRef-based mapping (elementMap + reverseMap) — avoids memory leaks
-- `getElementByRef(ref)` / `getRefForElement(el)` — bidirectional ref lookup
-- `getElementCoordinates(ref)` — returns `{x, y, width, height}` for click targeting, auto-scrolls into view
-- `generate(mode, maxDepth, maxChars, focusRef)` — tree generation:
-  - Mode `"interactive"`: omits non-interactive elements (token-efficient), unlimited depth
-  - Mode `"all"`: depth-limited (max 30), includes all visible elements
+**`accessibility-tree.js`** — element mapping:
+- WeakRef mapping (elementMap + reverseMap) — no memory leaks
+- `getElementByRef(ref)` / `getRefForElement(el)` — bidirectional lookup
+- `getElementCoordinates(ref)` — `{x, y, width, height}` for click targeting, auto-scrolls into view
+- `generate(mode, maxDepth, maxChars, focusRef)`:
+  - `"interactive"`: omits non-interactive elements (token-efficient), unlimited depth
+  - `"all"`: depth-limited (max 30), all visible elements
   - Hard cap at `maxChars`, tree truncation with resume guidance
   - Element states: disabled, checked/unchecked, readonly, required, select options count
-  - Input values shown (excluding password), link destinations, accessible names
+  - Input values (excluding password), link destinations, accessible names
 - Role detection: 30+ HTML tag→ARIA role mappings
 - Visibility check: display/visibility/opacity + offset dimensions
-- `ref_id` argument to start tree from a specific element (for paginated navigation)
+- `ref_id` starts the tree from a specific element (for paginated navigation)
 
-**`page-bridge.js`** — Page interaction layer:
-- `getPageText(maxChars)`: Content auto-detection via 10 heuristic selectors (article, main, post-content, entry-content, etc.), picks largest content container
-- `fillForm(ref, value)`: Form field filler:
-  - `<select>`: matches by value or option text, fires `change` event
+**`page-bridge.js`** — page interaction:
+- `getPageText(maxChars)`: auto-detects content via 10 heuristic selectors (article, main, post-content, entry-content, etc.), picks the largest container
+- `fillForm(ref, value)`:
+  - `<select>`: matches by value or option text, fires `change`
   - checkbox/radio: sets `.checked`, fires `change`
-  - file input: rejected (requires CDP)
-  - text/textarea: prototype setter (`HTMLInputElement.prototype` / `HTMLTextAreaElement.prototype`) for React/Vue controlled-component compatibility
+  - file input: routes to CDP `DOM.setFileInputFiles`; `value` is an absolute path on the MCP-server machine
+  - text/textarea: prototype setter (`HTMLInputElement.prototype` / `HTMLTextAreaElement.prototype`) for React/Vue controlled components
   - contentEditable: `execCommand('insertText')` fallback
-  - After fill: sets cursor to end of value via `setSelectionRange`
+  - After fill: cursor to end via `setSelectionRange`
   - Events: `InputEvent('input', {inputType:'insertText'})` + `Event('change')`
-- `searchElements(query, maxResults)`: Multi-term scoring across text/aria-label/role, returns sorted results
+- `searchElements(query, maxResults)`: multi-term scoring across text/aria-label/role, sorted results
 
-**`auto-capture.js`** — HTML→Markdown converter:
+**`auto-capture.js`** — HTML→Markdown:
 - Scans `h1-h6, p, a, li, pre, code, blockquote, table, img, figure, figcaption, dl, dt, dd, details, summary, strong, em`
-- Renders: headings (`#`), paragraphs, links `[text](url)`, code blocks (`` ``` ``), blockquotes (`>`), images `![alt](src)`
-- List rendering: ordered (1. 2.) and unordered (-), nested indentation via recursion
-- Table rendering: header separator, max 10 rows / 8 cols, pipe escaping
-- Details/summary: rendered as `> **summary** > content`
-- DL: DT as bold, DD indented
-- Figure: embedded image + caption
+- Renders headings (`#`), paragraphs, links `[text](url)`, code blocks (`` ``` ``), blockquotes (`>`), images `![alt](src)`
+- Lists: ordered (1. 2.) and unordered (-), nested indentation via recursion
+- Tables: header separator, max 10 rows / 8 cols, pipe escaping
+- Details/summary: `> **summary** > content`
+- DL: DT bold, DD indented
+- Figure: image + caption
 - Filters icons <50px
 
-**`visual-indicator.js`** — DOM overlay UI:
-- Shadow DOM container (z-index 2147483647, pointer-events: none default)
-- Element highlighting: green pulsing border animation, scrolls into view
-- Status badges: loading (⏳), completed (✅), error (❌) — positioned top-right, clickable to dismiss
+**`visual-indicator.js`** — DOM overlay:
+- Shadow DOM container (z-index 2147483647, pointer-events: none by default)
+- Element highlight: green pulsing border, scrolls into view
+- Status badges: loading (⏳), completed (✅), error (❌) — top-right, click to dismiss
 - Agent UI: pulsing green border around viewport + centered "Stop" button at bottom
-- Stop button sends `STOP_TOOL_EXECUTION` message, disables on click
+- Stop button sends `STOP_TOOL_EXECUTION`, disables on click
 - All UI via chrome.runtime.onMessage: `SHOW_HIGHLIGHT`, `HIDE_HIGHLIGHT`, `SHOW_STATUS`, `HIDE_STATUS`, `SHOW_AGENT_UI`, `HIDE_AGENT_UI`, `HIDE_ALL`
 
 ### Keyboard handling
 
 - Key aliases: `return`→Enter, `cmd`→Meta, `esc`→Escape, `up`→ArrowUp, etc. (15+ aliases)
-- VK code mapping: 18 codes (Enter, Tab, Escape, Backspace, Delete, arrows, Home, End, PageUp/Down)
-- Modifier parsing: `alt+ctrl+shift+t` → bitmask, supports `cmd`, `meta`, `control`, `shift`, `alt`
+- VK code mapping: 19 codes (Enter, Tab, Escape, Backspace, Delete, Insert, Space, Control, Alt, Shift, Meta, arrows, Home, End, PageUp/Down)
+- Modifier parsing: `alt+ctrl+shift+t` → bitmask; supports `cmd`, `meta`, `control`, `shift`, `alt`
 - Special combos: `Cmd+R` / `Ctrl+R` / `F5` → tab reload
 - Repeat support (up to 100×)
 
@@ -222,8 +221,8 @@ Tools are executed in strict FIFO order per extension instance. Each tool has a 
 
 - `takeScreenshot(quality)`:
   - Quality tiers: `low` (target 27KB, q=20→5), `medium` (270KB, q=40→10), `high` (670KB, q=60→20)
-  - Iterative quality reduction: starts at tier quality, decrements by 5 until under threshold or min quality
-  - HiDPI scaling: viewport emulated to 1280px width, restored after screenshot
+  - Iterative quality reduction: start at tier quality, decrement by 5 until under threshold or min quality
+  - HiDPI scaling: viewport emulated to 1280px width, restored after
   - Screenshot context stored for coordinate remapping
   - Returns `screenshot(element)` — crops to element bounding box with 10% padding
 - `zoom` action: region screenshot (x0/y0/x1/y1), fixed 60% quality
@@ -306,12 +305,13 @@ Tools are executed in strict FIFO order per extension instance. Each tool has a 
 | Issue | Status | Impact |
 |-------|--------|--------|
 | **Port 19222 conflict** — multiple Claude Code sessions compete for the same WebSocket port | Fixed: PID file + EADDRINUSE → client mode fallback + 3 retries | Mild: retry adds latency |
-| **FIFO queue single-threaded** — same-tab tools execute serially; one stuck tool blocks the queue | Open | Moderate: slow workflows |
+| **FIFO queue single-threaded** — all tools share one global queue, so tools in *different* tabs run one at a time too; one stuck tool blocks everything | Open | Moderate: slow workflows |
 | **MV3 SW idle kill** — Chrome may kill Service Worker after ~30s idle | Mitigated: dual keepalive (interval + alarms) | Rare: reconnect adds 1-2s delay |
 | **Screenshot quality loop** — iterative linear degradation (not binary search) | Open | Low: 1-2 extra CDP calls |
 | **waitForLoad polling** — 100ms interval until `status=complete` | Open | Low: may miss SPA navigations |
 | **No end-to-end health check** — MCP shows "Connected" even if extension dropped | Fixed: `health_check` tool walks every hop and reports which one broke | — |
 | **Content scripts injected serially** — 4 separate executeScript calls | Fixed: all four files go in one `executeScript` call via a `files` array (a separate cheap probe call checks whether they are already present) | — |
+| **Chrome 136+ blocks `--remote-debugging-port`** on the default profile, so the "just launch Chrome with a debug port" approach no longer works | Known limitation — an extension driving `chrome.debugger` is the remaining path, which is what this project does | You cannot attach an external CDP client to a normal Chrome profile |
 | **Lid closed + battery** — Chrome suspends CDP on battery sleep | Known limitation | Unusable |
 | **Hover → click bug** — historical; fixed (hover now sends mouseMoved only) | Fixed | — |
 
@@ -337,7 +337,9 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 [MIT](LICENSE)
 
 ## Tech Stack
-|-------|-----------|
+
+| Layer | Stack |
+|-------|-------|
 | Extension | Manifest V3, Service Worker, `chrome.debugger` (CDP v1.3), `chrome.scripting` |
 | MCP Server | Node.js, `@modelcontextprotocol/sdk`, `ws` (WebSocket Server) |
 | Content Scripts | WeakRef element mapping, prototype setter (form fill), Shadow DOM UI |
