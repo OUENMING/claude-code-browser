@@ -123,7 +123,7 @@ async function processQueue() {
     const start = performance.now();
     try {
       log('Executing tool:', item.toolName);
-      const result = await executeTool(item.toolName, item.args);
+      const result = await executeToolBounded(item.toolName, item.args);
       if (result?.error) {
         sendResponse(item.messageId, null, result.error);
       } else {
@@ -137,6 +137,31 @@ async function processQueue() {
     if (elapsed > 5000) log(`Slow tool: ${item.toolName} took ${Math.round(elapsed)}ms`);
   }
   state.queueRunning = false;
+}
+
+// An await inside executeTool that never settles (injection into a frozen tab, a
+// debugger that cannot attach, a CDP command that never returns) used to wedge the
+// global FIFO queue permanently: queueRunning stayed true, every later call from
+// every client was queued but never run, and only an extension reload recovered it.
+// Bounding the await turns that into one failed call. The orphaned work still runs
+// to completion — same as the server-side 30s timeout, which also gives up waiting
+// without stopping the extension. 60s sits above the longest legitimate tool
+// (wait_for caps at 30s) so it only ever fires on a genuine hang.
+const TOOL_HANG_MS = 60000;
+
+async function executeToolBounded(toolName, args) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Tool ${toolName} did not settle within ${TOOL_HANG_MS}ms — abandoned so the queue keeps moving`)),
+      TOOL_HANG_MS
+    );
+  });
+  try {
+    return await Promise.race([executeTool(toolName, args), guard]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function sendResponse(messageId, result, error) {
@@ -252,23 +277,75 @@ async function callContentScript(tabId, func, args = []) {
   }
 }
 
+// chrome.scripting.executeScript never settles on a tab Edge has put to sleep, so
+// an awaiting tool call never returns — and since every tab-touching tool funnels
+// through ensureContentScripts, one sleeping tab used to stall the whole serial
+// queue. health_check picking a background tab to probe was enough to freeze every
+// client. Bounding the injection turns a permanent stall into a fast local failure.
+const INJECT_TIMEOUT_MS = 8000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms — the tab is probably asleep; click it once to wake it, or pass another tabId`)),
+        ms
+      );
+    })
+  ]);
+}
+
 async function ensureContentScripts(tabId) {
   try {
-    const [r] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => !!(globalThis.__ccAccessibilityTree && globalThis.__ccBridge && globalThis.__ccAutoCapture)
-    });
+    const [r] = await withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => !!(globalThis.__ccAccessibilityTree && globalThis.__ccBridge && globalThis.__ccAutoCapture)
+      }),
+      INJECT_TIMEOUT_MS, 'content-script probe');
     if (r?.result === true) return;
-  } catch {}
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: [
-      'content-scripts/accessibility-tree.js',
-      'content-scripts/page-bridge.js',
-      'content-scripts/auto-capture.js',
-      'content-scripts/visual-indicator.js'
-    ]
-  });
+  } catch (e) {
+    // A probe that hangs means the tab is asleep — injecting would hang too, so
+    // fail here instead of falling through to the injection below.
+    if (/timed out/.test(e.message)) throw e;
+  }
+  await withTimeout(
+    chrome.scripting.executeScript({
+      target: { tabId },
+      files: [
+        'content-scripts/accessibility-tree.js',
+        'content-scripts/page-bridge.js',
+        'content-scripts/auto-capture.js',
+        'content-scripts/visual-indicator.js'
+      ]
+    }),
+    INJECT_TIMEOUT_MS, 'content-script injection');
+}
+
+// The action resolver is only needed by resolve_actions, so it is injected here
+// rather than added to the shared readiness probe: widening that probe would make
+// every already-injected tab re-run a full injection on first touch, which is the
+// expensive path. Tabs loaded after the manifest change already have it.
+async function ensureActionResolver(tabId) {
+  try {
+    const [r] = await withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => !!globalThis.__ccActionResolver
+      }),
+      INJECT_TIMEOUT_MS, 'action-resolver probe');
+    if (r?.result === true) return;
+  } catch (e) {
+    if (/timed out/.test(e.message)) throw e;
+  }
+  await withTimeout(
+    chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content-scripts/action-resolver.js']
+    }),
+    INJECT_TIMEOUT_MS, 'action-resolver injection');
 }
 
 // === TOOL ROUTING ===
@@ -434,6 +511,44 @@ async function handleFind(tabId, args) {
   );
   const text = r.map(el => `[${el.ref}] ${el.text} (${el.role}, score=${el.score})`).join('\n') || '(no matches)';
   return { content: [{ type: 'text', text }] };
+}
+
+// === RESOLVE ACTIONS ===
+// Declarative named actions → concrete refs, or an explicit miss. Read-only:
+// the caller still acts through computer/form_input with the returned refs.
+async function handleResolveActions(tabId, args) {
+  await ensureContentScripts(tabId);
+  await ensureActionResolver(tabId);
+  const r = await callContentScript(tabId,
+    (spec) => globalThis.__ccActionResolver?.resolve(spec) || { error: 'action resolver not available' },
+    [{ actions: args.actions || [] }]
+  );
+  if (r?.error) return { content: [{ type: 'text', text: String(r.error) }], isError: true };
+
+  const lines = [
+    `页面: ${r.title || ''} ${r.url || ''}`.trim(),
+    `扫描: ${r.scanned} 个可见可交互元素`,
+    ''
+  ];
+  for (const a of r.results || []) {
+    if (a.status === 'missing') {
+      lines.push(`✗ ${a.name} — 未找到（0 个候选）`);
+      continue;
+    }
+    const mark = a.status === 'resolved' ? '✓' : '⚠';
+    // Ambiguous results carry no chosen element, so the target part is omitted
+    // rather than printed as three undefineds.
+    let line = a.ref
+      ? `${mark} ${a.name} → [${a.ref}] ${a.role} "${a.label}"`
+      : `${mark} ${a.name}`;
+    if (a.value != null) line += ` = "${a.value}"`;
+    line += ` (${a.candidates} 个候选)`;
+    if (a.status === 'ambiguous') line += ` — 无法唯一确定，请加 pick 或改用 read_page`;
+    if (a.note) line += ` · ${a.note}`;
+    lines.push(line);
+    for (const alt of a.alternatives || []) lines.push(`      · [${alt.ref}] "${alt.label}"`);
+  }
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
 }
 
 // === COMPUTER (click, type, key, screenshot, scroll, etc.) ===
@@ -1177,6 +1292,7 @@ const TOOL_HANDLERS = {
   navigate: handleNavigate,
   read_page: handleReadPage,
   find: handleFind,
+  resolve_actions: handleResolveActions,
   computer: handleComputer,
   form_input: handleFormInput,
   wait_for: handleWaitFor,

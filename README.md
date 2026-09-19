@@ -71,7 +71,7 @@ Extension   (background.js + content-scripts)   独占 CDP · FIFO 队列
 1. Edge/Chrome 加载 Extension（开发者模式）
 2. Claude Code 自动拉起 MCP Server
 3. Extension 经 WebSocket 连接 MCP Server
-4. 自动注册 15 个浏览器工具
+4. 自动注册 16 个浏览器工具
 
 ## 项目结构
 
@@ -126,7 +126,7 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 
 ## 使用说明
 
-### 15 个工具一览
+### 16 个工具一览
 
 #### 导航
 | 工具 | 参数 | 说明 |
@@ -138,6 +138,7 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 |------|------|------|
 | `read_page` | `filter?`, `depth?`, `max_chars?`, `ref_id?`, `keywords?`, `diff?`, `tabId?` | 可访问性元素树，带 `[ref_N]` 标识符。`filter="interactive"` 仅交互元素（省 token），`"all"` 全部。`keywords` 空格分隔只输出匹配元素。`diff=true` 只返回相对上次快照的变化——按 ref 逐个比对，元素只是移动了不算变化；带过滤的读取不存为基线。结果附带实时诊断（控制台报错、失败的网络请求）和待处理弹窗警告 |
 | `find` | `query`, `max_results?`, `tabId?` | 按关键词搜索元素，多词打分排序，返回 ref 列表 |
+| `resolve_actions` | `actions[]`, `tabId?` | 把「具名动作」确定性地解析成元素 ref。每个动作声明 `name` + 匹配条件（`role` / `name_contains` / `name_matches` / `text_contains` / `text_matches`），可选 `pick` 选择模式（`first` / `last` / `top` 按页面位置 / `min` / `max` 按数值，配 `pick_from` 正则，默认抓数字）。返回三种状态：✓ 唯一命中、⚠ 多候选无法唯一确定（附候选样本）、✗ 未找到。**只读**——拿到 ref 后仍需用 `computer` / `form_input` 执行。与 `find` 的差别：只扫可见可交互元素（不碰折叠菜单和页脚）、能按数值挑「最便宜的票档」、命不中时明说未找到而不是返回空表。⚠️ 只认有 a11y role 的元素，React 无 role 的 div（如小红书的 `...展开`）看不见，那种用 `find` |
 | `wait_for` | `selector?`, `text?`, `timeout?`, `tabId?` | 等待元素或文本出现。默认 10s 超时，300ms 轮询 |
 
 #### 交互

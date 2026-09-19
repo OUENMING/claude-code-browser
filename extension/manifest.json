@@ -9,6 +9,7 @@
   "content_scripts": [
     { "matches": ["http://*/*", "https://*/*"], "js": ["content-scripts/accessibility-tree.js"], "run_at": "document_idle" },
     { "matches": ["http://*/*", "https://*/*"], "js": ["content-scripts/page-bridge.js"], "run_at": "document_idle" },
+    { "matches": ["http://*/*", "https://*/*"], "js": ["content-scripts/action-resolver.js"], "run_at": "document_idle" },
     { "matches": ["http://*/*", "https://*/*"], "js": ["content-scripts/auto-capture.js"], "run_at": "document_idle" },
     { "matches": ["http://*/*", "https://*/*"], "js": ["content-scripts/visual-indicator.js"], "run_at": "document_idle" }
   ],

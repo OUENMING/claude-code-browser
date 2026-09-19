@@ -213,6 +213,7 @@
 
   globalThis.__ccAccessibilityTree = {
     generate, getElementCoordinates, getElementByRef, getRefForElement, signature,
+    getRole, getAccessibleName, isVisible, isInteractive,
     elementMap, get elementCount() { return elementMap.size; }
   };
 })();

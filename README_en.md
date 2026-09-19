@@ -27,11 +27,11 @@ Startup:
 1. Load the Extension in Edge/Chrome (developer mode)
 2. Claude Code auto-launches MCP Server via MCP config
 3. Extension connects to MCP Server over WebSocket
-4. All 15 browser tools are registered
+4. All 16 browser tools are registered
 
 ---
 
-## 15 Tools
+## 16 Tools
 
 ### Navigation
 | Tool | Parameters | Description |
@@ -43,6 +43,7 @@ Startup:
 |------|-----------|-------------|
 | `read_page` | `filter?`, `depth?`, `max_chars?`, `ref_id?`, `keywords?`, `diff?`, `tabId?` | Accessibility element tree with ref IDs. `filter="interactive"` for interactive elements only (token-efficient), `"all"` for everything. `keywords` emits only matching elements. `diff=true` returns only what changed since the last full read — compared per-ref, so an element that merely moved is not a change. Filtered reads are not stored as a baseline. Includes live diagnostics (console errors, failed network requests) and pending dialog warnings |
 | `find` | `query`, `max_results?`, `tabId?` | Search elements by keyword across text/aria-label/title/role. Multi-term scoring, returns ref list |
+| `resolve_actions` | `actions[]`, `tabId?` | Resolve declared named actions into element refs deterministically. Each action declares `name` plus matchers (`role` / `name_contains` / `name_matches` / `text_contains` / `text_matches`) and an optional `pick` mode (`first` / `last` / `top` by page position / `min` / `max` by number, with a `pick_from` regex, digits by default). Returns three states: ✓ unique match, ⚠ ambiguous with sample candidates, ✗ not found. **Read-only** — act on the ref with `computer` / `form_input`. Differs from `find`: scans visible interactive elements only (no collapsed menus or footers), can pick "the cheapest ticket" by number, and reports a miss as a miss instead of an empty list. ⚠️ Only sees elements with an a11y role — React divs without one (e.g. Xiaohongshu's `...expand`) are invisible to it; use `find` for those |
 | `wait_for` | `selector?`, `text?`, `timeout?`, `tabId?` | Wait for element or text to appear. Selector uses CSS visibility check, text matches page content. Default 10s timeout, 300ms poll interval |
 
 ### Interaction
