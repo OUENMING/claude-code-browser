@@ -1,6 +1,6 @@
 # CLAUDE.md · claude-code-browser
 
-Chrome/Edge 扩展 + MCP server，让 Claude Code 驱动**用户真实、已登录的浏览器**（导航/点击/输入/填表/截图/提取）。16 个 MCP 工具，无构建、无 CI，改完文件重载扩展即生效。架构评测（模块深度、seam 泄漏、深化机会）见 `ARCHITECTURE.md`——本文件只给指针与雷区，不重复它。
+Chrome/Edge 扩展 + MCP server，让 Claude Code 驱动**用户真实、已登录的浏览器**（导航/点击/输入/填表/截图/提取）。16 个 MCP 工具，无构建、无 CI（只有一份零依赖的解析器回归测试），改完文件重载扩展即生效。架构评测（模块深度、seam 泄漏、深化机会）见 `ARCHITECTURE.md`——本文件只给指针与雷区，不重复它。
 
 ## 三层与唯一物理 seam
 
@@ -22,7 +22,8 @@ Chrome/Edge 扩展 + MCP server，让 Claude Code 驱动**用户真实、已登�
 | 改 WS 帧 / 传输 / 多会话路由 / 角色判定 | `mcp-server/index.js:100-279` | 信封解析、`callExtension`（唯一请求出口）、双模与 `routeTable` |
 | 改后台状态 / 命令队列 / attach 生命周期 / 保活 | `extension/background.js` | `state`、FIFO 队列 `processQueue`、`ensureAttached`、双轨保活 |
 | 改 CDP 命令 / 某个工具的实现 | `extension/background.js:352-1290` | `executeTool` 入口 + 每个 `handleXxx`；用到的 CDP 域：`Page`/`Runtime`/`Network`/`DOM`/`Emulation`/`Input` |
-| 改页面内提取 / 表单填写 / 元素树 | `extension/content-scripts/` | 元素树 `accessibility-tree.js`（`generate`/`signature`/ref 映射）、`page-bridge.js`、`auto-capture.js`、`visual-indicator.js` |
+| 改页面内提取 / 表单填写 / 元素树 | `extension/content-scripts/` | 元素树 `accessibility-tree.js`（`generate`/`signature`/ref 映射，另导出 `getRole`/`getAccessibleName`/`isVisible`/`isInteractive` 供 resolver 复用）、`page-bridge.js`、`action-resolver.js`、`auto-capture.js`、`visual-indicator.js` |
+| 跑解析器回归测试 | `test/action-resolver.test.cjs` | 零依赖（手搓 DOM 桩，无 jsdom/jest），14 条断言覆盖 `resolve_actions` 的 resolved/ambiguous/missing 三态与各 pick 模式。`node test/action-resolver.test.cjs`，退出码 0 = 全过 |
 | 改权限 / 注入点 / 安全面 | `extension/manifest.json` | `permissions`（含 `debugger`）+ `host_permissions`（含 `<all_urls>`）+ 4 个内容脚本注入 |
 | 改 popup 行为 | `extension/popup.js` | 状态查询 / 重连 / 断开 CDP / 停止执行 |
 | 想知道某处为什么这样设计 | `ARCHITECTURE.md` | 架构评审：模块深度、seam 泄漏、深化机会 D1–D6 |
@@ -64,9 +65,10 @@ git -C /Users/owen/WorkBuddy/claude-code-browser log --oneline -15
 
 ## 完成判据
 
-本仓库**无测试、无 CI、无构建**（`package.json` 无 `scripts`），所以「改完」不等于「验证完」。一次改动算完成，当且仅当：
+本仓库**无 CI、无构建**（`package.json` 无 `scripts`），唯一自动化验证是 `test/action-resolver.test.cjs`。其余仍是手动，「改完」不等于「验证完」。一次改动算完成，当且仅当：
 
-1. 动了工具契约：`mcp-server/index.js` 的 `TOOLS` 与 `extension/background.js` 的 `TOOL_HANDLERS` 名字集合逐字一致，且描述只有 server 侧一份。
-2. 动了 WS 帧：两侧同时改，手动跑一次 `health_check`，链路逐跳为通。
-3. 动了 per-tab 状态：三处清理点（`tabs.onRemoved` / `debugger.onDetach` / `DISCONNECT_TAB`）都清到，无一处漏项。
-4. 在真实浏览器里手动跑一次受影响的工具（重载扩展后），确认返回内容与改动前的语义一致。
+1. 动了 `action-resolver.js`（或它依赖的 `accessibility-tree.js` 导出）：`node test/action-resolver.test.cjs` 全过，退出码 0。
+2. 动了工具契约：`mcp-server/index.js` 的 `TOOLS` 与 `extension/background.js` 的 `TOOL_HANDLERS` 名字集合逐字一致，且描述只有 server 侧一份。
+3. 动了 WS 帧：两侧同时改，手动跑一次 `health_check`，链路逐跳为通。
+4. 动了 per-tab 状态：三处清理点（`tabs.onRemoved` / `debugger.onDetach` / `DISCONNECT_TAB`）都清到，无一处漏项。
+5. 在真实浏览器里手动跑一次受影响的工具（重载扩展后），确认返回内容与改动前的语义一致。**注意先确认目标标签页不是休眠状态**（见 T8），否则会看到超时而非真实结果。
