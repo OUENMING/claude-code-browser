@@ -2,7 +2,7 @@
   if (globalThis.__ccVisualIndicator) return;
 
   let highlightEl = null, statusEl = null, stopEl = null, trackedEl = null;
-  let pulsingActive = false, pulsingBeforeHide = false, isMcp = false;
+  let pulsingActive = false;
 
   function getShadow() {
     let container = document.getElementById('cc-shadow-container');

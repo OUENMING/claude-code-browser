@@ -18,10 +18,10 @@ Chrome/Edge 扩展 + MCP server，让 Claude Code 驱动**用户真实、已登�
 |---|---|---|
 | 新增/修改工具契约 | `mcp-server/index.js:281-298` | `TOOLS`——**Claude Code 实际看到的那一份**，工具的单一权威定义 |
 | 同上（第二份拷贝，已漂移） | `extension/background.js:22-38` | `TOOL_DEFINITIONS`——同一接口的拷贝，**死数据**，唯一消费者是死分支 `list_tools` |
-| 新增工具要挂实现 | `extension/background.js:1291-1308` | `TOOL_HANDLERS`：`name → handler(tabId, args)` |
+| 新增工具要挂实现 | `extension/background.js:1309-1326` | `TOOL_HANDLERS`：`name → handler(tabId, args)` |
 | 改 WS 帧 / 传输 / 多会话路由 / 角色判定 | `mcp-server/index.js:100-279` | 信封解析、`callExtension`（唯一请求出口）、双模与 `routeTable` |
 | 改后台状态 / 命令队列 / attach 生命周期 / 保活 | `extension/background.js` | `state`、FIFO 队列 `processQueue`、`ensureAttached`、双轨保活 |
-| 改 CDP 命令 / 某个工具的实现 | `extension/background.js:352-1290` | `executeTool` 入口 + 每个 `handleXxx`；用到的 CDP 域：`Page`/`Runtime`/`Network`/`DOM`/`Emulation`/`Input` |
+| 改 CDP 命令 / 某个工具的实现 | `extension/background.js:357-1306` | `executeTool` 入口 + 每个 `handleXxx`；用到的 CDP 域：`Page`/`Runtime`/`Network`/`DOM`/`Emulation`/`Input` |
 | 改页面内提取 / 表单填写 / 元素树 | `extension/content-scripts/` | 元素树 `accessibility-tree.js`（`generate`/`signature`/ref 映射，另导出 `getRole`/`getAccessibleName`/`isVisible`/`isInteractive` 供 resolver 复用）、`page-bridge.js`、`action-resolver.js`、`auto-capture.js`、`visual-indicator.js` |
 | 跑解析器回归测试 | `test/action-resolver.test.cjs` | 零依赖（手搓 DOM 桩，无 jsdom/jest），14 条断言覆盖 `resolve_actions` 的 resolved/ambiguous/missing 三态与各 pick 模式。`node test/action-resolver.test.cjs`，退出码 0 = 全过 |
 | 改权限 / 注入点 / 安全面 | `extension/manifest.json` | `permissions`（含 `debugger`）+ `host_permissions`（含 `<all_urls>`）+ 4 个内容脚本注入 |
@@ -37,9 +37,9 @@ Chrome/Edge 扩展 + MCP server，让 Claude Code 驱动**用户真实、已登�
 
 **T2 · WS 无任何鉴权。** `mcp-server/index.js:143` 无 `verifyClient`、无 origin 校验、无 token；**角色由第一帧自报类型决定**（`extension_info` → extension 角色，其它 → client，先到先得，`mcp-server/index.js:208-218`）。同机任意进程连上 19222 先发一帧，即可冒充扩展并收到后续**全部**工具调用。不要把它当可信 seam 来设计。
 
-**T3 · `stopRequested` 是单向开关。** 全仓库只在 `extension/background.js:1337` 置 `true`，**没有任何地方置回 `false`**。用户在页面 stop 按钮上点一次，命令队列就永久死亡，直到扩展重载。碰队列相关的任何改动，这是首要陷阱。
+**T3 · `stopRequested` 现在两条路都会复位（2026-09-19 修，之前是单向开关）。** 原来置 `true` 后全仓库无人复位，用户点一次页面上的停止按钮，命令队列就永久死亡，直到重载扩展。现在：`processQueue`（`extension/background.js:118-145`）在队列转为空闲时复位（此刻 stop 已兑现——排队项已丢弃、在飞的工具已返回）；STOP 到达而**没有在飞的活**时立即复位（否则没人会替它复位）。被丢弃的排队调用会收到 `{ code: 'STOPPED' }`，不再让客户端干等 30s 传输超时。**碰队列代码时确认这两条复位路径都在**——漏掉任一条就退回原病。
 
-**T4 · 命令队列全局串行，无取消。** `processQueue`（`extension/background.js:118-140`）同一时刻只跑一个工具：任一工具慢，全部工具慢。CDP 调用（`chrome.debugger.sendCommand`）全仓库无 timeout；server 侧 30s 只是「不再等」，扩展仍会把活干完。**`javascript_tool`/`read_page`/`navigate` 在高负载下超时是这条架构症状，不要给单个工具打补丁。** 2026-09-19 起 `processQueue` 的 await 走 `executeToolBounded`（`TOOL_HANG_MS=60000`）兜底——见 T8，那是「永不返回」的必修项，不是性能优化。
+**T4 · 命令队列全局串行，无取消。** `processQueue`（`extension/background.js:118-145`）同一时刻只跑一个工具：任一工具慢，全部工具慢。CDP 调用（`chrome.debugger.sendCommand`）全仓库无 timeout；server 侧 30s 只是「不再等」，扩展仍会把活干完。**`javascript_tool`/`read_page`/`navigate` 在高负载下超时是这条架构症状，不要给单个工具打补丁。** 2026-09-19 起 `processQueue` 的 await 走 `executeToolBounded`（`TOOL_HANG_MS=60000`）兜底——见 T8，那是「永不返回」的必修项，不是性能优化。
 
 **T5 · `wait_for` 必然先超时。** schema 上限 30000（`mcp-server/index.js:286`）= 传输默认超时 30000（`mcp-server/index.js:268`）→ `wait_for(timeout=30000)` 永远被传输层先判失败。
 
@@ -47,7 +47,7 @@ Chrome/Edge 扩展 + MCP server，让 Claude Code 驱动**用户真实、已登�
 
 **T7 · 新增一个工具要改三处：** server `TOOLS` + 扩展 `TOOL_HANDLERS` + handler 实现。漏一处即静默失效或漂移。（部署时还有第四处：扩展未重载 → server 已能列出工具、调用却返回 `Unknown tool`。）
 
-**T8 · 注入无超时，一个休眠标签页能冻死整条队列（2026-09-19 已修）。** `chrome.scripting.executeScript` 在 Edge 内存节省器冻结的标签页上**永不 settle**；`ensureContentScripts`（`extension/background.js:300`）被**每个碰标签页的工具**调用，而 `processQueue` 全局串行 → 一个永不返回的 `await` 让 `queueRunning` 恒为 `true`，**所有 client 的每次调用全部超时**，只能靠重载扩展恢复。`try/catch` 挡不住它——**挂住不是异常**。触发条件很宽：活动标签是 `edge://` 或任何不可注入页时，`health_check` 会转去探**另一个**标签，撞上休眠页即可。
+**T8 · 注入无超时，一个休眠标签页能冻死整条队列（2026-09-19 已修）。** `chrome.scripting.executeScript` 在 Edge 内存节省器冻结的标签页上**永不 settle**；`ensureContentScripts`（`extension/background.js:305`）被**每个碰标签页的工具**调用，而 `processQueue` 全局串行 → 一个永不返回的 `await` 让 `queueRunning` 恒为 `true`，**所有 client 的每次调用全部超时**，只能靠重载扩展恢复。`try/catch` 挡不住它——**挂住不是异常**。触发条件很宽：活动标签是 `edge://` 或任何不可注入页时，`health_check` 会转去探**另一个**标签，撞上休眠页即可。
 - 两层界：`INJECT_TIMEOUT_MS=8000`（注入本身，超时抛错并提示标签页可能在休眠）+ `TOOL_HANG_MS=60000`（`executeToolBounded`，队列兜底，覆盖 CDP 命令那条同样无超时的路）
 - **反例（别再犯）**：不要为新内容脚本去放宽**共享就绪探针**——那会让每个已有标签页都重新注入一次，把「偶发踩雷」变成「必发」。新脚本用独立的 `ensureXxx` 按需注入
 - 诊断：扩展 SW console 在 `edge://extensions` → 该扩展 → **service worker / 检查视图**；用 Node 22 内建 `WebSocket` 直连 `ws://127.0.0.1:19222` 发 `{type:'tool_call',id:1,tool:'tabs_context',args:{}}`，可区分「扩展坏了」与「某条 client 路由坏了」

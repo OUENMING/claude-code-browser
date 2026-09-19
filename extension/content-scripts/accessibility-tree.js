@@ -153,11 +153,18 @@
       if (states.length) line += ` (${states.join(', ')})`;
       // Show current value for inputs (skip password, escape quotes and newlines)
       if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value && el.type !== 'password') {
-        line += ` = "${el.value.slice(0, 50).replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+        // Fields that declare themselves secret. Everything else is echoed,
+        // because seeing a filled value is the point of this tool. (Hidden inputs
+        // never reach here — they have no box, so isVisible rejects them.)
+        const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+        const secret = /current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp/.test(ac);
+        line += secret ? ' = <masked>' : ` = "${el.value.slice(0, 50).replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
       }
       if (chars + line.length > maxChars) {
         truncated = true;
-        lines.push(`\n[TRUNCATED at ${ref}. Use ref_id="${lastRef}" or increase max_chars.]`);
+        lines.push(lastRef
+          ? `\n[TRUNCATED at ${ref}. Use ref_id="${lastRef}" or increase max_chars.]`
+          : `\n[TRUNCATED at ${ref}. Increase max_chars.]`);
         return;
       }
       lines.push(line);

@@ -137,6 +137,11 @@ async function processQueue() {
     if (elapsed > 5000) log(`Slow tool: ${item.toolName} took ${Math.round(elapsed)}ms`);
   }
   state.queueRunning = false;
+  // Cleared as soon as the queue is idle. By now the stop has been honoured —
+  // queued work was dropped and the in-flight tool has returned (handleType
+  // breaks out of its loop on the flag) — so holding it any longer would only
+  // block the next call.
+  state.stopRequested = false;
 }
 
 // An await inside executeTool that never settles (injection into a frozen tab, a
@@ -1347,8 +1352,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'STOP_TOOL_EXECUTION') {
-    state.stopRequested = true;
+    // Answer the callers whose work is being dropped, instead of leaving them to
+    // time out at the transport layer 30s later.
+    for (const item of state.commandQueue) {
+      sendResponse(item.messageId, null, { code: 'STOPPED', message: 'Stopped by user before this call ran' });
+    }
     state.commandQueue = [];
+    // The flag only means "abort what is running right now". With nothing in
+    // flight there is no one to clear it later, and leaving it set made every
+    // subsequent call queue up and never run until the extension was reloaded.
+    if (state.queueRunning) state.stopRequested = true;
     sendResponse({ success: true });
     return true;
   }

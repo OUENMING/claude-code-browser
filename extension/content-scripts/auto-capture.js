@@ -166,8 +166,14 @@
     return items.join('\n');
   }
 
+  // Table clipping is by shape, not by the character budget, so these are
+  // deliberately independent of max_chars: a wide table rendered in full swamps
+  // the output however high the budget is.
+  const MAX_TABLE_ROWS = 10;
+  const MAX_TABLE_COLS = 8;
+
   function convertTable(el) {
-    const rows = [], mr = 10, mc = 8;
+    const rows = [], mr = MAX_TABLE_ROWS, mc = MAX_TABLE_COLS;
     for (let i = 0; i < Math.min(el.rows.length, mr); i++) {
       const cells = [];
       for (let j = 0; j < Math.min(el.rows[i].cells.length, mc); j++)

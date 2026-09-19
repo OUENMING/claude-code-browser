@@ -14,7 +14,7 @@
   const PICK_MODES = new Set(['first', 'last', 'top', 'min', 'max']);
 
   function norm(s) {
-    return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
+    return String(s === null || s === undefined ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
   }
 
   function safeRe(pattern, flags) {
@@ -125,6 +125,14 @@
     const actions = Array.isArray(spec && spec.actions) ? spec.actions : [];
     const { els, truncated } = scan();
     const refFor = el => T.getRefForElement(el);
+    // One builder for both paths, so which branch ran is not visible in the
+    // alternatives a caller receives: same shape, same page order, same cap.
+    const alternativesFor = cands => cands
+      .slice()
+      .sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      .slice(0, MAX_ALTERNATIVES)
+      .map(c => ({ ref: refFor(c.el), label: labelOf(c) }))
+      .filter(a => a.ref);
 
     const results = actions.map(a => {
       // A malformed spec used to fail silently: safeRe returns null for a bad
@@ -162,18 +170,10 @@
       if (!chosen) {
         // Ambiguity is only actionable if the caller can see what it is ambiguous
         // between, so return the topmost few rather than the bare count.
-        const sample = cands
-          .slice()
-          .sort((a, b) => (a.y - b.y) || (a.x - b.x))
-          .slice(0, MAX_ALTERNATIVES)
-          .map(c => ({ ref: refFor(c.el), label: labelOf(c) }));
-        return { name: a.name, status, candidates: cands.length, note, alternatives: sample };
+        return { name: a.name, status, candidates: cands.length, note, alternatives: alternativesFor(cands) };
       }
 
-      const alternatives = cands
-        .filter(c => c !== chosen)
-        .slice(0, MAX_ALTERNATIVES)
-        .map(c => ({ ref: refFor(c.el), label: labelOf(c) }));
+      const alternatives = alternativesFor(cands.filter(c => c !== chosen));
 
       return {
         name: a.name,
