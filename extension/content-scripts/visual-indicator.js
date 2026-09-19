@@ -1,7 +1,7 @@
 (function() {
   if (globalThis.__ccVisualIndicator) return;
 
-  let highlightEl = null, statusEl = null, stopEl = null;
+  let highlightEl = null, statusEl = null, stopEl = null, trackedEl = null;
   let pulsingActive = false, pulsingBeforeHide = false, isMcp = false;
 
   function getShadow() {
@@ -15,6 +15,18 @@
     return shadow;
   }
 
+  // The overlay lives inside a position:fixed host, so it must be placed in
+  // viewport coordinates — the old code added scrollX/scrollY (document
+  // coordinates) and was therefore offset by the scroll amount.
+  function placeOverlay() {
+    if (!highlightEl || !trackedEl) return;
+    const r = trackedEl.getBoundingClientRect();
+    highlightEl.style.left = `${r.left - 4}px`;
+    highlightEl.style.top = `${r.top - 4}px`;
+    highlightEl.style.width = `${r.width + 8}px`;
+    highlightEl.style.height = `${r.height + 8}px`;
+  }
+
   function highlightElement(ref) {
     const tree = globalThis.__ccAccessibilityTree;
     if (!tree) return;
@@ -22,21 +34,17 @@
     if (!el) return;
     clearHighlight();
 
-    const r = el.getBoundingClientRect();
-    const sx = window.scrollX || window.pageXOffset;
-    const sy = window.scrollY || window.pageYOffset;
     const shadow = getShadow();
-
     highlightEl = document.createElement('div');
     highlightEl.id = 'cc-highlight-overlay';
     highlightEl.style.cssText = `
-      position: absolute; left: ${r.left + sx - 4}px; top: ${r.top + sy - 4}px;
-      width: ${r.width + 8}px; height: ${r.height + 8}px;
+      position: fixed;
       border: 3px solid #4CAF50; border-radius: 4px;
-      box-sizing: border-box;
+      box-sizing: border-box; pointer-events: none;
       animation: cc-pulse 1s ease-in-out infinite;
     `;
     const style = document.createElement('style');
+    style.id = 'cc-highlight-styles';
     style.textContent = `
       @keyframes cc-pulse {
         0%, 100% { border-color: #4CAF50; box-shadow: 0 0 5px rgba(76,175,80,0.5); }
@@ -45,16 +53,27 @@
     `;
     shadow.appendChild(style);
     shadow.appendChild(highlightEl);
+    trackedEl = el;
+    placeOverlay();
+    // The smooth scroll below moves the element, and the page can be scrolled by
+    // hand at any time; without this the box stays where it was first drawn.
+    window.addEventListener('scroll', placeOverlay, true);
+    window.addEventListener('resize', placeOverlay);
     el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
   }
 
   function clearHighlight() {
+    window.removeEventListener('scroll', placeOverlay, true);
+    window.removeEventListener('resize', placeOverlay);
     const container = document.getElementById('cc-shadow-container');
     if (container?.shadowRoot) {
       const h = container.shadowRoot.getElementById('cc-highlight-overlay');
       if (h) h.remove();
+      const s = container.shadowRoot.getElementById('cc-highlight-styles');
+      if (s) s.remove();
     }
     highlightEl = null;
+    trackedEl = null;
   }
 
   function showStatusBadge(status) {
@@ -65,16 +84,26 @@
 
     statusEl = document.createElement('div');
     statusEl.style.cssText = `
-      position: fixed; top: 20px; right: 20px; background: ${colors[status]};
+      position: fixed; top: 20px; right: 20px; background: ${colors[status] || '#616161'};
       color: white; padding: 12px 20px; border-radius: 8px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 14px; font-weight: 600; cursor: pointer;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       display: flex; align-items: center; gap: 8px;
       transition: all 0.3s ease;
+      pointer-events: auto;
     `;
-    statusEl.innerHTML = `${icons[status]} ${status.charAt(0).toUpperCase() + status.slice(1)}`;
-    statusEl.onclick = () => { statusEl.style.opacity = '0'; setTimeout(() => statusEl?.remove(), 300); };
+    // status arrives in a runtime message, so treat it as untrusted input: it
+    // goes through textContent, and an unknown status gets a fallback instead of
+    // rendering "undefined Undefined".
+    const icon = icons[status] ?? 'ℹ️';
+    const label = typeof status === 'string' && status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
+    statusEl.textContent = `${icon} ${label}`;
+    // Captured locally: `statusEl` is module-level and reassigned by the next
+    // SHOW_STATUS within the 300ms, and a timer reading it later would then
+    // remove the new badge while leaving this one on screen.
+    const node = statusEl;
+    node.onclick = () => { node.style.opacity = '0'; setTimeout(() => node.remove(), 300); };
     shadow.appendChild(statusEl);
   }
 
@@ -87,7 +116,9 @@
     const shadow = getShadow();
 
     // Pulsing border
-    if (!document.getElementById('cc-pulse-styles')) {
+    // The style lands in the shadow root, so the guard has to look there too —
+    // document.getElementById never sees it and the guard was always true.
+    if (!shadow.getElementById('cc-pulse-styles')) {
       const s = document.createElement('style');
       s.id = 'cc-pulse-styles';
       s.textContent = `
@@ -141,13 +172,22 @@
         transition: all 0.2s ease;
       `;
       btn.addEventListener('click', async () => {
+        // Disabled before the await: the send can take a moment, and until it
+        // settles a second click would fire another stop command.
+        btn.disabled = true;
+        btn.textContent = 'Stopping...';
+        btn.style.opacity = '0.7';
         try {
           await chrome.runtime.sendMessage({ type: 'STOP_TOOL_EXECUTION' });
-          btn.textContent = 'Stopping...';
-          btn.disabled = true;
-          btn.style.opacity = '0.7';
           setTimeout(() => hideAgentUI(), 500);
-        } catch {}
+        } catch {
+          // Dead extension context, CSP refusal, anything — say so and let the
+          // user retry rather than swallowing it behind a button that no longer
+          // responds.
+          btn.disabled = false;
+          btn.textContent = '停止失败，点击重试';
+          btn.style.opacity = '1';
+        }
       });
       container.appendChild(btn);
       shadow.appendChild(container);

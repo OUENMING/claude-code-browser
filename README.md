@@ -138,14 +138,14 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 |------|------|------|
 | `read_page` | `filter?`, `depth?`, `max_chars?`, `ref_id?`, `keywords?`, `diff?`, `tabId?` | 可访问性元素树，带 `[ref_N]` 标识符。`filter="interactive"` 仅交互元素（省 token），`"all"` 全部。`keywords` 空格分隔只输出匹配元素。`diff=true` 只返回相对上次快照的变化——按 ref 逐个比对，元素只是移动了不算变化；带过滤的读取不存为基线。结果附带实时诊断（控制台报错、失败的网络请求）和待处理弹窗警告 |
 | `find` | `query`, `max_results?`, `tabId?` | 按关键词搜索元素，多词打分排序，返回 ref 列表 |
-| `resolve_actions` | `actions[]`, `tabId?` | 把「具名动作」确定性地解析成元素 ref。每个动作声明 `name` + 匹配条件（`role` / `name_contains` / `name_matches` / `text_contains` / `text_matches`），可选 `pick` 选择模式（`first` / `last` / `top` 按页面位置 / `min` / `max` 按数值，配 `pick_from` 正则，默认抓数字）。返回三种状态：✓ 唯一命中、⚠ 多候选无法唯一确定（附候选样本）、✗ 未找到。**只读**——拿到 ref 后仍需用 `computer` / `form_input` 执行。与 `find` 的差别：只扫可见可交互元素（不碰折叠菜单和页脚）、能按数值挑「最便宜的票档」、命不中时明说未找到而不是返回空表。⚠️ 只认有 a11y role 的元素，React 无 role 的 div（如小红书的 `...展开`）看不见，那种用 `find` |
+| `resolve_actions` | `actions[]`, `tabId?` | 把「具名动作」确定性地解析成元素 ref。每个动作声明 `name` + 匹配条件（`role` / `name_contains` / `name_matches` / `text_contains` / `text_matches`），可选 `pick` 选择模式（`first` / `last` / `top` 按页面位置 / `min` / `max` 按数值，配 `pick_from` 正则，默认抓数字）。返回四种状态：✓ 唯一命中、⚠ 多候选无法唯一确定（附候选样本）、✗ 未找到、‼ 参数错误（正则非法等，附原因）。扫描触到上限时另带 `truncated`——此时 `missing` 可能是预算被吃掉，不一定是页面上真的没有。**只读**——拿到 ref 后仍需用 `computer` / `form_input` 执行。与 `find` 的差别：只扫可见可交互元素（不碰折叠菜单和页脚）、能按数值挑「最便宜的票档」、命不中时明说未找到而不是返回空表。⚠️ 只认有 a11y role 的元素，React 无 role 的 div（如小红书的 `...展开`）看不见，那种用 `find` |
 | `wait_for` | `selector?`, `text?`, `timeout?`, `tabId?` | 等待元素或文本出现。默认 10s 超时，300ms 轮询 |
 
 #### 交互
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `computer` | `action` + 13 个可选参数 | 鼠标/键盘/截图/滚动。动作：`left_click`, `right_click`, `double_click`, `triple_click`, `type`, `screenshot`, `screenshot_element`, `wait`, `scroll`, `scroll_to`, `key`, `left_click_drag`, `hover`, `zoom`。文本用 `Input.insertText` 按段批量输入。**点击/按键默认校验页面是否变化**，无变化即警告（`verify: false` 关闭） |
-| `form_input` | `ref`+`value` 或 `fields[]`, `tabId?` | 设置表单字段值（单个或批量）。React/Vue 受控组件兼容。checkbox 接受 boolean。file input 走 CDP `DOM.setFileInputFiles`，`value` 须是运行 MCP server 那台机器上的绝对路径 |
+| `form_input` | `ref`+`value` 或 `fields[]`, `tabId?` | 设置表单字段值（单个或批量）。React/Vue 受控组件兼容。checkbox 接受 boolean。file input 走 CDP `DOM.setFileInputFiles`，`value` 须是运行 MCP server 那台机器上的绝对路径；它返回 `status: "need_file_upload"`，与普通失败区分开。没有可写原生 value 的元素（如普通 div）会明确返回失败，不会假装填写成功 |
 
 #### 内容提取
 | 工具 | 参数 | 说明 |
@@ -270,6 +270,7 @@ node index.js
 | CDP 独占 | 只有 Extension 操作 CDP，无直接 DevTools 暴露 |
 | PID 文件保护 | `/tmp/claude-browser-mcp.pid`，自动清理过期进程 |
 | 标签页隔离 | 每标签独立 CDP session；popup 提供"断开"按钮 |
+| Markdown 协议白名单 | `get_page_markdown` 只写 http/https/mailto/tel/ftp 与相对路径，`javascript:`、`data:` 等一律丢弃 |
 
 ## 路线图
 

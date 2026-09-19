@@ -530,9 +530,16 @@ async function handleResolveActions(tabId, args) {
     `扫描: ${r.scanned} 个可见可交互元素`,
     ''
   ];
+  if (r.truncated) {
+    lines.push(`⚠️ 已达扫描上限（${r.scanned}），页面上还有未扫到的元素 —— 下面的 missing 可能是预算被吃掉，不一定是"页面上没有"`, '');
+  }
   for (const a of r.results || []) {
     if (a.status === 'missing') {
       lines.push(`✗ ${a.name} — 未找到（0 个候选）`);
+      continue;
+    }
+    if (a.status === 'error') {
+      lines.push(`‼ ${a.name} — 参数有问题: ${a.error || '未知错误'}`);
       continue;
     }
     const mark = a.status === 'resolved' ? '✓' : '⚠';
@@ -570,7 +577,7 @@ async function getSignature(tabId) {
   // Content script unreachable (e.g. mid-navigation) — url/title still tell us a lot.
   try {
     const tab = await chrome.tabs.get(tabId);
-    return { sig: null, url: tab.url || '', title: tab.title || '', count: 0, interactive: 0 };
+    return { sig: null, url: tab.url || '', title: tab.title || '', count: 0, interactive: 0, truncated: false };
   } catch { return null; }
 }
 
@@ -602,7 +609,13 @@ async function verifyAction(tabId, before) {
   const domChanged = after.sig !== before.sig;
 
   if (!urlChanged && !titleChanged && !domChanged) {
-    return `[verify] ⚠️ No detectable change after ${Date.now() - start}ms. The click may have missed, hit a disabled or covered element, or the effect is visual-only. Re-read the page before the next step.`;
+    // The fingerprint stops counting past its cap on very dense pages, so a change
+    // below that point would not show up here. Say that instead of letting "no
+    // detectable change" read as proof the action missed.
+    const cap = after.truncated
+      ? ' The page is large enough that the DOM fingerprint stopped counting past its cap, so a change below that point would not register — re-read the page rather than assuming the action missed.'
+      : '';
+    return `[verify] ⚠️ No detectable change after ${Date.now() - start}ms. The click may have missed, hit a disabled or covered element, or the effect is visual-only. Re-read the page before the next step.${cap}`;
   }
 
   const noise = before.noisy

@@ -11,6 +11,7 @@
 
   const MAX_SCAN = 4000;        // visible interactive elements examined per call
   const MAX_ALTERNATIVES = 4;   // refs allocated for non-chosen candidates
+  const PICK_MODES = new Set(['first', 'last', 'top', 'min', 'max']);
 
   function norm(s) {
     return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
@@ -30,12 +31,13 @@
   // the caller's spec was never meant to reach.
   function scan() {
     const T = globalThis.__ccAccessibilityTree;
-    if (!T) return [];
+    if (!T) return { els: [], truncated: false };
     const out = [];
     const seen = new Set();
+    let truncated = false;
 
     function walk(el) {
-      if (out.length >= MAX_SCAN) return;
+      if (out.length >= MAX_SCAN) { truncated = true; return; }
       if (!T.isVisible(el)) return;
       const role = T.getRole(el);
       if (role && T.isInteractive(el) && !seen.has(el)) {
@@ -60,7 +62,7 @@
     }
 
     if (document.body) walk(document.body);
-    return out;
+    return { els: out, truncated };
   }
 
   function match(spec, els) {
@@ -102,7 +104,11 @@
       for (const c of cands) {
         const m = (c.text + ' ' + c.name).match(re);
         if (!m) continue;
-        const v = parseFloat(String(m[1] != null ? m[1] : m[0]).replace(/,/g, ''));
+        const raw = m[1] !== undefined && m[1] !== null ? m[1] : m[0];
+        // Only strip a comma that really is a thousands separator (1,234 /
+        // 1,234,567). A blanket /,/g reads the European decimal "1,50" as 150 and
+        // picks the wrong tier.
+        const v = parseFloat(String(raw).replace(/,(?=\d{3}(\D|$))/g, ''));
         if (Number.isFinite(v)) scored.push({ c, v });
       }
       if (!scored.length) return { chosen: null, note: '没有候选能按 pick_from 解析出数字' };
@@ -117,10 +123,22 @@
     if (!T) return { error: 'accessibility tree not available' };
 
     const actions = Array.isArray(spec && spec.actions) ? spec.actions : [];
-    const els = scan();
+    const { els, truncated } = scan();
     const refFor = el => T.getRefForElement(el);
 
     const results = actions.map(a => {
+      // A malformed spec used to fail silently: safeRe returns null for a bad
+      // pattern, and `if (nameRe && …)` then dropped the constraint altogether,
+      // so a typo matched every element instead of reporting anything. Unknown
+      // pick modes were likewise reported as `ambiguous`, indistinguishable from
+      // a genuine tie. Both are caller mistakes and get their own status.
+      const bad = [];
+      if (a.name_matches && !safeRe(a.name_matches)) bad.push(`name_matches 不是合法正则: ${a.name_matches}`);
+      if (a.text_matches && !safeRe(a.text_matches)) bad.push(`text_matches 不是合法正则: ${a.text_matches}`);
+      if (a.pick_from && !safeRe(a.pick_from)) bad.push(`pick_from 不是合法正则: ${a.pick_from}`);
+      if (a.pick && !PICK_MODES.has(a.pick)) bad.push(`未知 pick 模式: ${a.pick}`);
+      if (bad.length) return { name: a.name, status: 'error', candidates: 0, error: bad.join('; ') };
+
       const cands = match(a, els);
       if (!cands.length) {
         return { name: a.name, status: 'missing', candidates: 0 };
@@ -170,7 +188,9 @@
       };
     });
 
-    return { url: location.href, title: document.title, scanned: els.length, results };
+    // `truncated` tells the caller that a `missing` may be a budget casualty
+    // rather than proof the action is absent from the page.
+    return { url: location.href, title: document.title, scanned: els.length, truncated, results };
   }
 
   globalThis.__ccActionResolver = { resolve };

@@ -3,6 +3,13 @@
   const elementMap = new Map(), reverseMap = new WeakMap();
   let nextRefId = 1;
 
+  // Refs handed to the caller may still be in use, so only entries whose WeakRef
+  // has already been collected are dropped — those can never resolve again.
+  // Without this the map grows for the whole life of the content script.
+  function pruneDeadRefs() {
+    for (const [ref, wr] of elementMap) if (!wr.deref()) elementMap.delete(ref);
+  }
+
   function getElementByRef(ref) {
     return elementMap.get(ref)?.deref() || null;
   }
@@ -85,9 +92,15 @@
   }
 
   function generate(mode = 'interactive', maxDepth = 15, maxChars = 50000, focusRef = null, keywords = null) {
-    // Hard ceiling — even if caller passes a huge depth, cap it to prevent
-    // unreadable truncated output on dense pages (e.g. Amazon/Taobao).
+    pruneDeadRefs();
+    // Two different limits, deliberately. Non-interactive modes honour the
+    // caller's depth (capped at 30) to keep the output readable. Interactive mode
+    // is NOT capped at 30 — wrapper elements on real pages nest far deeper and
+    // cutting there would drop live controls — so it gets a generous structural
+    // ceiling instead: enough to stop a pathological or self-referential DOM from
+    // blowing the stack, without changing what a normal page yields.
     const depthLimit = Math.min(maxDepth, 30);
+    const interactiveDepthCeiling = 200;
     const kwList = keywords ? String(keywords).toLowerCase().split(/\s+/).filter(Boolean) : null;
     let focusEl = null;
     if (focusRef) {
@@ -95,7 +108,7 @@
       if (!focusEl) return { tree: `[Error] Element not found: ${focusRef}`, elementCount: 0 };
     }
     const lines = [];
-    let chars = 0, truncated = false, lastRef = null;
+    let chars = 0, truncated = false, lastRef = null, emitted = 0;
 
     // Recursion helper: pierces iframe (same-origin) and shadow DOM so refs
     // cover embedded widgets, not just top-level document.body children.
@@ -108,7 +121,7 @@
 
     function walk(el, depth) {
       if (truncated || !isVisible(el)) return;
-      if (mode !== 'interactive' && depth > depthLimit) return;
+      if (depth > (mode === 'interactive' ? interactiveDepthCeiling : depthLimit)) return;
       const role = getRole(el);
       if (mode === 'interactive' && !isInteractive(el) && !role) {
         recurseChildren(el, depth);
@@ -148,6 +161,7 @@
         return;
       }
       lines.push(line);
+      emitted++;
       chars += line.length + 1;
       lastRef = ref;
       recurseChildren(el, depth);
@@ -158,7 +172,9 @@
 
     return {
       tree: (truncated ? '[Warning: truncated]\n' : '') + lines.join('\n'),
-      elementCount: elementMap.size,
+      // Nodes emitted by THIS call — not elementMap.size, which also counts refs
+      // handed out by earlier calls and entries whose element has been collected.
+      elementCount: emitted,
       truncated
     };
   }
@@ -207,7 +223,11 @@
       sig: String(h >>> 0),
       title: document.title,
       url: location.href,
-      count, interactive, textChars: nonInteractiveText
+      count, interactive, textChars: nonInteractiveText,
+      // True once the caps above stopped the walk. A change confined to the part
+      // that was never walked leaves `sig` identical, so callers must not read an
+      // unchanged sig as proof that nothing happened.
+      truncated: count >= MAX_NODES || parts.length >= MAX_PARTS
     };
   }
 

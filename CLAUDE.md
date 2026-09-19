@@ -71,4 +71,4 @@ git -C /Users/owen/WorkBuddy/claude-code-browser log --oneline -15
 2. 动了工具契约：`mcp-server/index.js` 的 `TOOLS` 与 `extension/background.js` 的 `TOOL_HANDLERS` 名字集合逐字一致，且描述只有 server 侧一份。
 3. 动了 WS 帧：两侧同时改，手动跑一次 `health_check`，链路逐跳为通。
 4. 动了 per-tab 状态：三处清理点（`tabs.onRemoved` / `debugger.onDetach` / `DISCONNECT_TAB`）都清到，无一处漏项。
-5. 在真实浏览器里手动跑一次受影响的工具（重载扩展后），确认返回内容与改动前的语义一致。**注意先确认目标标签页不是休眠状态**（见 T8），否则会看到超时而非真实结果。
+5. 在真实浏览器里手动跑一次受影响的工具（重载扩展后），确认返回内容与改动前的语义一致。**修订顺序**：改内容脚本 → `edge://extensions` 重载 → **再刷新页面**。只刷新页面拿不到新脚本（实测：跑的还是旧代码）；只重载扩展则已注入的脚本全部失效。**注意先确认目标标签页不是休眠状态**（见 T8），否则会看到超时而非真实结果。
