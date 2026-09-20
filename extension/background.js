@@ -137,8 +137,8 @@ function deadlineError(stage) {
     ran_ms: ranMs,
     budget_ms: c.budgetMs ?? null,
     message: stage === 'queued'
-      ? `排在这个调用前面的工具吃掉了全部 ${c.budgetMs}ms 预算，它还没开始跑就被放弃了。重试即可；如果反复出现，先用 health_check 看是哪一跳卡住。`
-      : `跑到预算用完还没结束（已跑 ${ranMs}ms，预算 ${c.budgetMs}ms）。注意：页面里没干完的活**仍在继续**——CDP 取消不了一个正在 await 的循环。把长循环拆成多次调用，状态挂在 window 上。`
+      ? `排在这个调用前面的工具吃掉了全部 ${c.budgetMs}ms 预算（它已在队列里等了 ${c.queuedMs ?? 0}ms），还没开始跑就被放弃了。重试即可；如果反复出现，先用 health_check 看是哪一跳卡住。`
+      : `跑到预算用完还没结束（已跑 ${ranMs}ms，预算 ${c.budgetMs}ms）。这一步没有可用的取消手段——如果它是在页面里跑 JS，那段活**仍在继续**；长任务请拆成多次调用，状态挂在 window 上。`
   };
 }
 
@@ -150,7 +150,9 @@ async function processQueue() {
     const start = performance.now();
     state.currentCall = {
       toolName: item.toolName,
-      deadline: item.deadline || Date.now() + FALLBACK_BUDGET_MS,
+      // 老 server 不发 deadline 时，基准取**入队时刻**而不是此刻：排队等掉的时间也在同一份
+      // 预算里，否则「排队 10s + 执行 27s」会越过它 30s 的传输超时，孤儿照旧产生。
+      deadline: item.deadline || (item.enqueuedAt ?? Date.now()) + FALLBACK_BUDGET_MS,
       startedAt: Date.now(),
       budgetMs: item.deadline ? item.deadline - item.enqueuedAt + DEADLINE_MARGIN_MS : FALLBACK_BUDGET_MS,
       queuedMs: Date.now() - item.enqueuedAt,
@@ -200,12 +202,18 @@ async function executeToolBounded(toolName, args) {
   const hangMs = Math.max(2500, remainingMs() + HANG_GRACE_MS);
   const guard = new Promise((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`Tool ${toolName} did not settle within ${Math.round(hangMs)}ms — abandoned so the queue keeps moving`)),
+      () => reject(Object.assign(new Error(`Tool ${toolName} did not settle within ${Math.round(hangMs)}ms`), { ccDeadline: true })),
       hangMs
     );
   });
   try {
     return await Promise.race([executeTool(toolName, args), guard]);
+  } catch (e) {
+    // 工具自己没按 remainingMs() 收敛时（例如 read_page 走内容脚本那条路），最后由这里兜住。
+    // 走 deadlineError('executing') 而不是通用 INTERNAL_ERROR，是为了让 §T4 那个 `stage`
+    // 字段在两端都名副其实：调用方要能区分「排队出局」与「这一步太慢」。
+    if (e && e.ccDeadline) return { error: deadlineError('executing') };
+    throw e;
   } finally {
     clearTimeout(timer);
   }
@@ -387,7 +395,7 @@ async function ensureActionResolver(tabId) {
         target: { tabId },
         func: () => !!globalThis.__ccActionResolver
       }),
-      INJECT_TIMEOUT_MS, 'action-resolver probe');
+      injectTimeoutMs(), 'action-resolver probe');
     if (r?.result === true) return;
   } catch (e) {
     if (/timed out/.test(e.message)) throw e;
@@ -397,7 +405,7 @@ async function ensureActionResolver(tabId) {
       target: { tabId },
       files: ['content-scripts/action-resolver.js']
     }),
-    INJECT_TIMEOUT_MS, 'action-resolver injection');
+    injectTimeoutMs(), 'action-resolver injection');
 }
 
 // === TOOL ROUTING ===
@@ -422,23 +430,28 @@ async function handleNavigate(tabId, args) {
   let url = args.url || '';
   if (url === 'back') {
     await chrome.tabs.goBack(tabId);
-    await waitForLoad(tabId, 5000);
+    const loaded = await waitForLoad(tabId, 5000);
     const tab = await chrome.tabs.get(tabId);
-    return { content: [{ type: 'text', text: `Navigated back to: ${tab.url}` }] };
+    return { content: [{ type: 'text', text: `Navigated back to: ${tab.url}${loaded ? '' : LOAD_NOTE}` }] };
   }
   if (url === 'forward') {
     await chrome.tabs.goForward(tabId);
-    await waitForLoad(tabId, 5000);
+    const loaded = await waitForLoad(tabId, 5000);
     const tab = await chrome.tabs.get(tabId);
-    return { content: [{ type: 'text', text: `Navigated forward to: ${tab.url}` }] };
+    return { content: [{ type: 'text', text: `Navigated forward to: ${tab.url}${loaded ? '' : LOAD_NOTE}` }] };
   }
   if (!url.match(/^https?:\/\//i)) url = `https://${url}`;
   try { url = new URL(url).href; } catch { return { error: { code: 'BAD_REQUEST', message: `Invalid URL: ${url}` } }; }
   await chrome.tabs.update(tabId, { url });
-  await waitForLoad(tabId, 10000);
+  const loaded = await waitForLoad(tabId, 10000);
   const tab = await chrome.tabs.get(tabId);
-  return { content: [{ type: 'text', text: `Navigated to: ${tab.url}\nTitle: ${tab.title}` }] };
+  return { content: [{ type: 'text', text: `Navigated to: ${tab.url}\nTitle: ${tab.title}${loaded ? '' : LOAD_NOTE}` }] };
 }
+
+// waitForLoad 返回 false 表示「没等完」——超时或预算被截断。三个调用点原先都丢掉这个
+// 返回值，于是「因为没预算了没等完」被说成「导航成功」。带上这句，让调用方知道读内容前
+// 该先 wait_for / read_page。
+const LOAD_NOTE = '\n(页面可能仍在加载——等待被超时或剩余预算截断，读内容前先 wait_for 或 read_page)';
 
 async function waitForLoad(tabId, ms) {
   const budget = Math.min(ms, remainingMs());
@@ -661,7 +674,13 @@ async function verifyAction(tabId, before) {
   const budgetNote = outOfBudget
     ? ' [verify] 剩余预算不足，验证提前结束——结论可能不准，别把它当证据。'
     : '';
-  if (!after) return '[verify] Could not read page state after the action — the tab may have closed.';
+  if (!after) {
+    // 预算不足时循环第一轮就 break，after 仍是 null —— 那不是「标签页关了」，
+    // 说成关了会给出方向相反的结论（这一步到底有没有生效，完全没验到）。
+    return outOfBudget
+      ? '[verify] 剩余预算不足，连一次页面状态都没读到就收尾了——这次操作**未经验证**，别读成「没生效」。'
+      : '[verify] Could not read page state after the action — the tab may have closed.';
+  }
 
   const urlChanged = after.url !== before.url;
   const titleChanged = after.title !== before.title;
@@ -867,7 +886,7 @@ async function handleType(tabId, args) {
     typed += r.length;
     await sleep(5);
   }
-  return { content: [{ type: 'text', text: `Typed ${typed} characters` }] };
+  return { content: [{ type: 'text', text: `Typed ${typed} characters${typed < text.length ? ' (被停止按钮中断——页面上只有这一部分，重打前先看当前值)' : ''}` }] };
 }
 
 async function keyEventSimple(tabId, key, vk) {
@@ -1135,7 +1154,9 @@ async function handleGetPageMarkdown(tabId, args) {
 async function detectJsForm(tabId, code) {
   try {
     const result = await chrome.debugger.sendCommand({ tabId }, 'Runtime.compileScript', {
-      expression: `(${code})`, sourceURL: '', persistScript: false
+      // 结尾的换行与 buildEvaluateExpression 里是同一条理由：payload 若以行注释结尾，
+      // 探测会把「合法表达式」误报成编译失败，随后按语句序列跑，值就静默丢了。
+      expression: `(${code}\n)`, sourceURL: '', persistScript: false
     });
     return formFromProbe({ result });
   } catch (e) {

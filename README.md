@@ -90,9 +90,11 @@ claude-code-browser/
 │   │   └── visual-indicator.js     # Shadow DOM 叠加层 UI
 │   └── icons/                      # 扩展图标
 ├── mcp-server/
-│   └── index.js                    # MCP Server（双模 WebSocket）
+│   ├── index.js                    # MCP Server（双模 WebSocket）
+│   └── budget.js                   # 每次调用的预算表与边界归一化（可在 node 里单测）
 ├── test/                           # 零依赖回归测试（node 直接跑，无框架）
 │   ├── action-resolver.test.cjs    # resolve_actions 的三态与 pick 模式
+│   ├── budget.test.cjs             # 预算表的边界（脏 timeout / 原型链）
 │   └── deadline.test.cjs           # 预算/超时/执行次数的不变式
 ├── docs/                           # 文档站点
 │   ├── index.html
@@ -270,6 +272,7 @@ node index.js
 
 # 回归测试（零依赖，直接跑，退出码 0 = 全过）
 node test/action-resolver.test.cjs    # resolve_actions 的解析三态
+node test/budget.test.cjs             # 调用预算表的边界（脏 timeout、原型链）
 node test/deadline.test.cjs           # 调用预算 / 超时 / 执行次数的不变式
 ```
 

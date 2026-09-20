@@ -1,6 +1,6 @@
 # PLAN · 超时与取消（deadline seam）
 
-> 状态：**待开工** · 写于 2026-09-20 · 起因：小红书抓帖第 4 篇 `Timeout calling javascript_tool`（见 `~/Obsidian/SecondBrain/Projects/claude-code-browser-浏览器MCP.md` 的「实测事故」）
+> 状态：**已落地（`0ae1de5` 已提交推送）+ 按 ocr 复核补了 11 处（见 §8 / §9）** · 写于 2026-09-20 · 起因：小红书抓帖第 4 篇 `Timeout calling javascript_tool`（见 `~/Obsidian/SecondBrain/Projects/claude-code-browser-浏览器MCP.md` 的「实测事故」）
 > 关联：`ARCHITECTURE.md` §D4（本文是它的落地版，并修正了它两处前提）+ §7.1（可靠性）
 
 ---
@@ -72,8 +72,11 @@
 | `javascript_tool` | 45000 | 42000（其中**页面内硬顶** 25000） |
 | `wait_for` | `args.timeout + 5000` | 预算 − 3000 |
 | `computer` | 45000 | 42000 |
-| `tabs_context` / `tabs_create` / `health_check` | 10000 | 7000 |
+| `tabs_context` / `tabs_create` | 10000 | 7000 |
+| `health_check` | 15000 | 12000 |
 | 其它默认 | 30000 | 27000 |
+
+> ⚠️ 本节是**动工前**的草案；最终的数字与边界处理以 `mcp-server/budget.js` 为准（health_check 后来从 10s 改成 15s，见 §9 第 1 条）。
 
 - `JS_EXEC_CAP_MS = 25000`：单次 `javascript_tool` 在**页面内**的硬顶。理由：留出 CDP 往返与序列化余量，且远超正常抓取（第 1–3 篇都在 25s 内完成）。
 - `TOOL_HANG_MS` 从常数改为 `deadline − now + 2000`，只作为「扩展自己没算准」的最后保险。
@@ -124,6 +127,8 @@ sendResponse(item.messageId, null, {
 | `background.js:785` `handleType` | 每字符 20ms | 剩余 < 500ms 停，返回已输入部分 |
 
 ### 3.4 `handleJavaScript` 重写（本文档最要紧的一段）
+
+> ⚠️ 下面是**动工前的草案**，最终实现见 `extension/background.js` 的 `handleJavaScript` / `detectJsForm` 与 `extension/deadline.js`。三处已按实测改掉：形态判定改用 `Runtime.compileScript` 探测、payload 里用户代码后要补换行（行注释会吞掉收尾符号）、预算用 `budgetForJavaScript` 而不是内联的 `Math.min`。差异清单在 §8。
 
 替换 `background.js:1070-1092` 整个函数。三个变化：**删掉死掉的快路径**、**删掉 r1/r2 回退链**、**加页面内 deadline**。
 
@@ -327,10 +332,43 @@ MCP server 本会话已重连（新 pid 54905），**信封 `deadline` 与按工
 - `Runtime.evaluate` 的 `timeout` 参数到底覆不覆盖 `awaitPromise`（Experimental，只当兜底，不影响结论）。
 - 四个循环收敛后的真实表现（`read_page` / `computer` / `computer.type`）——它们的代码路径已按同一规则改，但没有单独构造慢页面来测。
 
-### 下一步
+### 下一步（已全部完成）
 
 ```bash
-# 1) 再重载一次扩展（上面两个修复生效）：edge://extensions → Claude Code 浏览器助手 → 刷新
-# 2) 重连 MCP server 让 server 侧生效：/mcp → reconnect（或新开会话）
-# 3) 复跑两条：语句形态 → 42；长 JS + tabs_context 同发 → 前者 JS_DEADLINE、后者 stage:'queued'
+# 1) 重载扩展：edge://extensions → 刷新          ✅ 已做，6 项复测通过
+# 2) 重连 MCP server：/mcp → reconnect           ✅ 已做，wait_for(30000) 报 30000ms 证明 deadline 已生效
+# 3) 语句形态 → 42；长 JS + tabs_context → queued ✅ 两条都验过（见上表）
 ```
+
+---
+
+## 9. ocr 复核后的修补（2026-09-20 晚）
+
+`ocr review --commit 0ae1de5`（阿里 open-code-review，4 文件 / +382 行，**16 分 39 秒**，走 cc-switch 花费 0）报 15 条：**0 critical / 0 high**，9 medium + 6 low。逐条回原码核实后 **11 条真** —— 全部是这次改动**自己引入的不一致**，已修完：
+
+| # | 它报的 | 修法 |
+|---|---|---|
+| 1 | `health_check` 调用点写死 8000，绕过预算表 → 信封 deadline 只剩 5s（比扩展自己的 8s 探针上限还短），表里的 15000 成死配置 | 去掉第三参，走表（15s） |
+| 2 | 我收窄 `tabs_context` 的 catch 用的 `/not connected/i` **匹配不到真实的断开文案** | 改判 `!extConnected`（真实文案是 `Extension disconnected` / `Upstream disconnected`） |
+| 3 | fallback deadline 用**出队时刻**算，与它上方的注释矛盾 → 老 server 下排队时间不进预算，孤儿照旧 | 改用 `item.enqueuedAt + FALLBACK_BUDGET_MS` |
+| 4 | reject 分支正则含 `invalid`/`parse`，会误命中 `Invalid parameters` → 合法表达式静默变 `undefined` | 收窄到 `/syntax ?error\|unexpected/i` |
+| 5 | `injectTimeoutMs()` 漏落 `ensureActionResolver` 两处 | 一并替换 |
+| 6 | `queuedMs` 写完没人读（死字段） | 用进 queued 文案（排队耗时对定位有价值） |
+| 7 | 预算不足时 `!after` 返回路径丢了 `budgetNote` → 误报「标签页可能已关闭」 | 两种文案分开 |
+| 8 | 用户代码以行注释结尾时，收尾符号被注释吞掉 | 用户代码后补换行（两个模板 + 探测表达式三处），并加「真能解析」断言 |
+| 9 | `deadlineError('executing')` 不可达（死分支） | 接到 `executeToolBounded` 的兜底上，让 `stage` 名副其实 |
+| 10 | `waitForLoad` 返回值被三处调用点丢弃 → 「没等完」被说成「导航成功」 | 返回文案带上 `LOAD_NOTE` |
+| 11 | 边界硬化：`args.timeout` 非数值 → NaN、`TOOL_BUDGET_MS['constructor']` 命中原型链 | 抽出 **`mcp-server/budget.js`**（区间归一化 + 自身属性判定），`test/budget.test.cjs` 19 条断言 |
+
+**它报错的 2 条（没照改）**：
+
+- `typed += r.length` 被指「换行导致虚高」→ **实测 `text.length == sum(run.length)`**，与旧行为完全一致，不存在虚高
+- 尾随行注释被指「静默返回 undefined」→ **真机实测报的是 `SyntaxError: Unexpected token 'catch'`**：是真 bug，但后果说反了
+
+**它重复上报**：同一处 `health_check` 预算问题报了两条（`:303` 与 `:356`）。
+
+**另一条属实但没动**：`handleType` 被 STOP 打断仍算成功返回 —— 那属于 STOP 契约（`CLAUDE.md` T3 的范围），本次只在文案上标明「被停止按钮中断」，不改状态语义。
+
+**测试**：`deadline.test.cjs` 36 条 + `budget.test.cjs` 19 条 + `action-resolver.test.cjs` 14 条，全过（`node test/*.test.cjs`）。
+
+**这一轮的教训**：11 条里有 8 条是「我改了 A 却忘了同步 B」——同一个改动面里的**不一致**，而不是新的复杂度。`ocr` 的价值恰恰在这个方向：它没有我「我为什么这么写」的记忆负担。

@@ -16,7 +16,7 @@ Claude Code Browser Automation lets Claude Code control your real browser throug
 ## Architecture
 
 ```
-Claude Code ←──stdio──→ MCP Server (index.js) ←──ws:127.0.0.1:19222──→ Edge/Chrome Extension
+Claude Code ←──stdio──→ MCP Server (index.js + budget.js) ←──ws:127.0.0.1:19222──→ Edge/Chrome Extension
                                                                               │
                                                                         CDP (DevTools Protocol)
                                                                               │
@@ -91,6 +91,8 @@ Every tool has a budget on the server side, and the extension's deadline is 3 se
 | `health_check` | 15s |
 | `tabs_context` / `tabs_create` | 10s |
 | everything else | 30s |
+
+The budget table and its boundary handling (a non-numeric `timeout`, `'constructor'` reaching through the prototype chain) live in `mcp-server/budget.js`, covered by `test/budget.test.cjs`.
 
 The queue is **strictly serial** (one tool at a time), so waiting in line counts against your own budget. A timeout tells you which half it was:
 

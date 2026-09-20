@@ -44,9 +44,22 @@ function t(name, cond, detail) {
     (stmts.split('const a = 1; return a').length - 1) === 1,
     `出现 ${stmts.split('const a = 1; return a').length - 1} 次`);
 
-  t('表达式形态按表达式跑', expr.includes('await (document.title)'));
+  t('表达式形态按表达式跑', expr.includes('await (document.title\n)'));
   t('语句形态包进 async IIFE，所以 return 与顶层 await 都能用',
-    stmts.includes('await (async () => { const a = 1; return a })()'));
+    stmts.includes('await (async () => { const a = 1; return a\n })()'));
+
+  // 行注释那一条是真机踩出来的：`document.title // 注释` 曾被报成 "Unexpected token 'catch'"，
+  // 因为收尾的 `)` 被注释吃掉。修法就是在用户代码后面补一个换行。
+  const commented = buildEvaluateExpression('document.title // 标题', 5000);
+  t('用户代码以行注释结尾时，收尾符号不会被注释吞掉',
+    commented.includes('document.title // 标题\n)'));
+  t('行注释那份也真的能解析（不只是字符串对得上）', (() => {
+    try { new Function(`return ${commented}`); return true; } catch (e) { return false; }
+  })());
+  t('语句形态的行注释同样处理', (() => {
+    const s = buildEvaluateExpression('document.title // 标题', 5000, 'statements');
+    try { new Function(`return ${s}`); return true; } catch (e) { return false; }
+  })());
 
   t('超时走 resolve 分支——reject 会被 awaitPromise 吞成 undefined',
     /new Promise\(r => setTimeout\(\(\) => r\(\{ ok: false, deadline: true/.test(expr));
@@ -67,6 +80,9 @@ function t(name, cond, detail) {
   t('结果为空也不崩', formFromProbe({ result: undefined }) === 'expression');
   t('compileScript 不可用（reject）→ 退回表达式形态', formFromProbe({ error: "'Runtime.compileScript' wasn't found" }) === 'expression');
   t('reject 里是语法错误 → 语句序列', formFromProbe({ error: "Uncaught SyntaxError: Unexpected token 'const'" }) === 'statements');
+  t('与语法无关的 reject 不再被误判成语句序列（否则值会静默丢成 undefined）',
+    formFromProbe({ error: 'Invalid parameters' }) === 'expression' &&
+    formFromProbe({ error: 'Cannot parse response' }) === 'expression');
   t('认出其它的 reject 也不崩', formFromProbe({ error: 'Target closed' }) === 'expression');
   t('无参数也不崩', formFromProbe() === 'expression');
 

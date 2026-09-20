@@ -24,9 +24,12 @@ export const JS_EXEC_CAP_MS = 25000;
 //   · 预算内必定返回 —— Promise.race 的 **resolve** 分支报超时（用 reject 会被吞）。
 // 页面里没干完的活**无法取消**，所以超时文案必须说清楚，见 background.js。
 export function buildEvaluateExpression(code, budgetMs, form = 'expression') {
+  // ${code} 后面那个换行不是排版：用户代码若以行注释结尾（`document.title // 标题`），
+  // 收尾的 `)` 或 `})()` 会被注释吞掉，两种形态一起变成语法错误。实测报出来的是
+  // "Unexpected token 'catch'"—— 我那层 payload 的结构，完全看不出跟那行注释有关。
   const run = form === 'statements'
-    ? `await (async () => { ${code} })()`
-    : `await (${code})`;
+    ? `await (async () => { ${code}\n })()`
+    : `await (${code}\n)`;
   return `Promise.race([
   (async () => {
     try { return { ok: true, val: ${run} }; }
@@ -48,7 +51,9 @@ export function buildEvaluateExpression(code, budgetMs, form = 'expression') {
 //   · 探测手段本身不可用时（方法不存在等），保守按表达式来 —— 那是最简形态，退化最轻。
 export function formFromProbe({ result, error } = {}) {
   if (error !== undefined) {
-    if (/syntax ?error|unexpected|invalid|parse/i.test(String(error))) return 'statements';
+    // 只认明确的语法信号。写成 /invalid|parse/ 会误命中 'Invalid parameters' 这类与语法
+    // 无关的报错，于是合法表达式被当语句跑、静默返回 undefined —— 值丢了还报不出错。
+    if (/syntax ?error|unexpected/i.test(String(error))) return 'statements';
     return 'expression';
   }
   return result && result.exceptionDetails ? 'statements' : 'expression';

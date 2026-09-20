@@ -4,10 +4,10 @@
 > 词汇约定：**模块 (module)** / **接口 (interface)** / **深度 (depth)** / **seam** / **adapter** / **leverage** / **locality**。本文严格只用这几个词描述结构，不用「组件 / 服务 / API / 边界」。
 >
 > **复核 2026-09-20（基线 `692d557`）** —— 本文写于 `ee71e50`，此后接口面动过，读 §4/§5/§7 前先套用这四条：
-> 1. **工具是 16 个**（`resolve_actions` 在 `cff5110` 加入）：下文所有「15 个」按 16 读。`TOOLS` 现在 `mcp-server/index.js:310-327`；扩展 `TOOL_DEFINITIONS`（`background.js:25-41`）仍是 15 条、**少了 `resolve_actions`** ⇒ §5.1(a) 那句「两份 15 条完全一致」已不成立，漂移换了个方向。
-> 2. **D4 已落地**（见下），并修正了它两处前提：CDP 其实有 `Runtime.evaluate {timeout}` 与 `Runtime.terminateExecution`（不必只靠扩展侧放弃等待）；progress 通知**不**延长 Claude Code 的硬墙钟。落地方案、实测证据与未决问题见 `PLAN-DEADLINE-20260920.md`。
+> 1. **工具是 16 个**（`resolve_actions` 在 `cff5110` 加入）：下文所有「15 个」按 16 读。`TOOLS` 现在 `mcp-server/index.js:294-311`；扩展 `TOOL_DEFINITIONS`（`background.js:25-41`）仍是 15 条、**少了 `resolve_actions`** ⇒ §5.1(a) 那句「两份 15 条完全一致」已不成立，漂移换了个方向。
+> 2. **D4 已落地**（见下），并修正了它两处前提：CDP 其实有 `Runtime.evaluate {timeout}` 与 `Runtime.terminateExecution`（不必只靠扩展侧放弃等待）；progress 通知**不**延长 Claude Code 的硬墙钟。落地方案与真机实测见 `PLAN-DEADLINE-20260920.md`；之后又按 `ocr` 复核补了 11 处（同文档 §9），其中 server 侧的预算表被抽成 `mcp-server/budget.js` 并配上 `test/budget.test.cjs`。
 > 3. §7.1 的两条失效机制已不成立：「CDP 调用无超时、无取消」现在是「有 deadline + CDP timeout，取消仍不可用」；「Stop 是单向开关」于 `692d557` 修（见 `CLAUDE.md` T3）。
-> 4. 行号普遍下移：`processQueue` `:145`、`executeToolBounded` `:198`、`ensureContentScripts` `:352`、`handleJavaScript` `:1149`、`TOOL_HANDLERS` `:1402`。
+> 4. 行号普遍下移：`processQueue` `:145`、`executeToolBounded` `:200`、`ensureContentScripts` `:360`、`handleJavaScript` `:1172`、`TOOL_HANDLERS` `:1441`。
 
 ---
 
