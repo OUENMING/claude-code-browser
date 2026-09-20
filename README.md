@@ -80,15 +80,20 @@ claude-code-browser/
 ├── extension/                      # Chrome/Edge Extension
 │   ├── manifest.json               # MV3 清单
 │   ├── background.js               # Service Worker
+│   ├── deadline.js                 # 预算/超时的纯函数（可在 node 里单测）
 │   ├── popup.html / popup.js       # 连接状态管理 UI
 │   ├── content-scripts/
 │   │   ├── accessibility-tree.js   # 元素映射系统（WeakRef 双向映射）
+│   │   ├── action-resolver.js      # 具名动作 → ref 的确定性解析（resolve_actions）
 │   │   ├── page-bridge.js          # 表单填充、文本提取、元素搜索
 │   │   ├── auto-capture.js         # HTML → Markdown 转换
 │   │   └── visual-indicator.js     # Shadow DOM 叠加层 UI
 │   └── icons/                      # 扩展图标
 ├── mcp-server/
 │   └── index.js                    # MCP Server（双模 WebSocket）
+├── test/                           # 零依赖回归测试（node 直接跑，无框架）
+│   ├── action-resolver.test.cjs    # resolve_actions 的三态与 pick 模式
+│   └── deadline.test.cjs           # 预算/超时/执行次数的不变式
 ├── docs/                           # 文档站点
 │   ├── index.html
 │   ├── technical-whitepaper.html
@@ -157,7 +162,7 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `health_check` | — | 端到端链路体检：MCP server → WebSocket → 扩展 → 内容脚本 → CDP，逐跳报告状态。工具报错时先用它定位断在哪一跳 |
-| `javascript_tool` | `text`, `tabId?` | 在页面执行 JS。10 万字符限制，scripting.executeScript 失败时 CDP 兜底 |
+| `javascript_tool` | `text`, `tabId?` | 在页面执行 JS。10 万字符限制。表达式与语句序列都支持（先只解析一次再决定形态）。**恰好执行一次**；失败返回 `JS_ERROR` 带原因，超出预算返回 `JS_DEADLINE` —— 见「单次调用的预算」 |
 | `read_console_messages` | `tabId`, `onlyErrors?`, `pattern?`, `clear?`, `limit?` | 读取控制台消息。支持正则匹配 |
 | `read_network_requests` | `tabId`, `urlPattern?`, `clear?`, `limit?` | 读取 HTTP 网络请求及状态码 |
 
@@ -171,6 +176,46 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `dismiss_dialog` | `action`, `promptText?`, `tabId?` | 关闭浏览器原生对话框（alert/confirm/prompt/beforeunload） |
+
+### 单次调用的预算与长任务
+
+每个工具在 server 侧有一个预算，而扩展拿到的截止时间比它早 3 秒——所以**超时总是先在扩展侧变成一条可读的错误**，而不是把调用方挂在传输层，也不是让扩展继续跑一个已经没人要的结果。
+
+| 工具 | 预算 |
+|------|------|
+| `javascript_tool` / `read_page` / `get_page_text` / `get_page_markdown` / `computer` | 45s |
+| `wait_for` | 你传的 `timeout` + 5s |
+| `navigate` | 20s |
+| `health_check` | 15s |
+| `tabs_context` / `tabs_create` | 10s |
+| 其它 | 30s |
+
+队列是**全局串行**的（同一时刻只跑一个工具），所以排队时间也算在你自己的预算里。超时会告诉你卡在哪一段：
+
+- `stage: 'queued'` —— 前面的工具吃掉了预算，这次还没开始跑。重试即可。
+- `stage: 'executing'` —— 是这次本身跑了太久。
+
+#### 长提取怎么拆
+
+超过约 25 秒的抓取（例如滚动加载一篇文章的全部评论）不要写成一次调用，拆成多次，状态挂在 `window` 上：
+
+```js
+// 第 1..N 次：每次只滚几轮，做完就返回进度
+(async () => {
+  window.__ccC = window.__ccC || { items: new Set(), rounds: 0 };
+  for (let i = 0; i < 4; i++) { window.scrollBy(0, 2000); await new Promise(r => setTimeout(r, 700)); }
+  window.__ccC.rounds += 4;
+  document.querySelectorAll('.comment-item').forEach(n => window.__ccC.items.add(n.innerText.slice(0, 80)));
+  return JSON.stringify({ rounds: window.__ccC.rounds, collected: window.__ccC.items.size });
+})()
+
+// 最后一次：取回数据
+JSON.stringify([...window.__ccC.items])
+```
+
+**为什么不能只把预算调大**：CDP 没有可靠的取消手段——能终止的只是「当前」那次脚本执行，而滚动循环每一轮都在 `await` 定时器，外层执行早就结束了。所以超时返回之后，**页面里那段活仍在继续**。把长活拆开会比给它更长的预算更好，也避免紧接着发出一个会跟它打架的调用。
+
+设计取舍与真机实测证据（含两处只有跑起来才发现的问题）见 [`PLAN-DEADLINE-20260920.md`](PLAN-DEADLINE-20260920.md)。
 
 ### 内容提取选择指南
 
@@ -194,6 +239,7 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 6. computer({ action: "left_click", ref: "ref_M" })     → 点帖子
 7. get_page_text({ max_chars: 5000 })             → 读全文
 ```
+逐篇抓「正文 + 全部评论」时，评论要滚动加载——**别把滚动循环写进一次 `javascript_tool`**，按「长提取怎么拆」分成多次调用。一次滚动十几轮很容易跨过 25s 的页面内硬顶。
 
 #### 表单填写（React/Vue 兼容）
 ```
@@ -215,12 +261,16 @@ claude mcp add -s user browser -- node /path/to/claude-code-browser/mcp-server/i
 
 ### 本地开发
 
-没有额外的构建步骤，直接改 `extension/` 或 `mcp-server/` 下的文件即可。
+没有额外的构建步骤，直接改 `extension/` 或 `mcp-server/` 下的文件即可。改完**重载扩展**（`edge://extensions` → 刷新）才生效；只改内容脚本的话刷新页面即可。
 
 ```bash
 # MCP Server 开发
 cd mcp-server
 node index.js
+
+# 回归测试（零依赖，直接跑，退出码 0 = 全过）
+node test/action-resolver.test.cjs    # resolve_actions 的解析三态
+node test/deadline.test.cjs           # 调用预算 / 超时 / 执行次数的不变式
 ```
 
 ### Extension 组件说明
@@ -228,7 +278,8 @@ node index.js
 | 组件 | 路径 | 说明 |
 |------|------|------|
 | Service Worker | `extension/background.js` | 双轨保活、WebSocket 管理、FIFO 命令队列、CDP 管理 |
-| 内容脚本 | `extension/content-scripts/` | 4 个独立脚本：元素映射 / 表单填充 / Markdown 转换 / 叠加层 UI |
+| 预算与超时 | `extension/deadline.js` | 纯函数：拼执行表达式、判形态、算页面内预算、分拣结果（可在 node 里单测） |
+| 内容脚本 | `extension/content-scripts/` | 5 个独立脚本：元素映射 / 具名动作解析 / 表单填充 / Markdown 转换 / 叠加层 UI |
 | Popup | `extension/popup.html/js` | 连接状态、端口配置、标签断开 |
 | MCP Server | `mcp-server/index.js` | 双模 WebSocket（服务端/客户端），多客户端路由 |
 

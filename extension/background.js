@@ -1,3 +1,5 @@
+import { DEADLINE_MARGIN_MS, buildEvaluateExpression, budgetForJavaScript, classifyJsResult, formFromProbe } from './deadline.js';
+
 // === STATE ===
 const state = {
   ws: null, connected: false, wsPort: 19222,
@@ -5,6 +7,7 @@ const state = {
   keepAliveTimer: null,
   attachedTabs: new Set(), enabledDomains: new Set(),
   commandQueue: [], queueRunning: false, stopRequested: false,
+  currentCall: null,           // 正在跑的那个调用：{toolName, deadline, startedAt, budgetMs}
   screenshotContexts: new Map(),
   tabEventBuffers: new Map(),
   pendingDialogs: new Map(),   // tabId -> {type, message, defaultPrompt}
@@ -64,7 +67,7 @@ function connectToMcpServer(port) {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'ping') { ws.send(JSON.stringify({ type: 'pong' })); return; }
-        if (msg.type === 'tool_call') { enqueueToolCall(msg.id, msg.tool, msg.args || {}); return; }
+        if (msg.type === 'tool_call') { enqueueToolCall(msg.id, msg.tool, msg.args || {}, msg.deadline); return; }
         if (msg.type === 'list_tools') { ws.send(JSON.stringify({ id: msg.id, result: { tools: TOOL_DEFINITIONS } })); return; }
       } catch {}
     };
@@ -110,9 +113,33 @@ function scheduleReconnect() {
 }
 
 // === FIFO COMMAND QUEUE ===
-function enqueueToolCall(messageId, toolName, args) {
-  state.commandQueue.push({ messageId, toolName, args });
+// 老版本 server 不发 deadline，就按它自己那个 30s 传输超时来假定，并先它一步放弃。
+const FALLBACK_BUDGET_MS = 30000 - DEADLINE_MARGIN_MS;
+
+// 当前调用还剩多少预算。排队等掉的与执行花掉的是**同一个**预算——这正是旧版缺的字段：
+// 调用方那边只剩 3s 了，扩展还按「还有 60s」在跑。
+function remainingMs() {
+  if (!state.currentCall) return Infinity;
+  return Math.max(0, state.currentCall.deadline - Date.now());
+}
+
+function enqueueToolCall(messageId, toolName, args, deadline) {
+  state.commandQueue.push({ messageId, toolName, args, deadline, enqueuedAt: Date.now() });
   processQueue();
+}
+
+function deadlineError(stage) {
+  const c = state.currentCall || {};
+  const ranMs = c.startedAt ? Date.now() - c.startedAt : 0;
+  return {
+    code: 'DEADLINE_EXCEEDED',
+    stage,
+    ran_ms: ranMs,
+    budget_ms: c.budgetMs ?? null,
+    message: stage === 'queued'
+      ? `排在这个调用前面的工具吃掉了全部 ${c.budgetMs}ms 预算，它还没开始跑就被放弃了。重试即可；如果反复出现，先用 health_check 看是哪一跳卡住。`
+      : `跑到预算用完还没结束（已跑 ${ranMs}ms，预算 ${c.budgetMs}ms）。注意：页面里没干完的活**仍在继续**——CDP 取消不了一个正在 await 的循环。把长循环拆成多次调用，状态挂在 window 上。`
+  };
 }
 
 async function processQueue() {
@@ -121,13 +148,25 @@ async function processQueue() {
   while (state.commandQueue.length > 0 && !state.stopRequested) {
     const item = state.commandQueue.shift();
     const start = performance.now();
+    state.currentCall = {
+      toolName: item.toolName,
+      deadline: item.deadline || Date.now() + FALLBACK_BUDGET_MS,
+      startedAt: Date.now(),
+      budgetMs: item.deadline ? item.deadline - item.enqueuedAt + DEADLINE_MARGIN_MS : FALLBACK_BUDGET_MS,
+      queuedMs: Date.now() - item.enqueuedAt,
+    };
     try {
-      log('Executing tool:', item.toolName);
-      const result = await executeToolBounded(item.toolName, item.args);
-      if (result?.error) {
-        sendResponse(item.messageId, null, result.error);
+      if (remainingMs() <= 0) {
+        // 排队等到出局：这是「前面有慢工具」，不是「这一步本身慢」，所以分开报。
+        sendResponse(item.messageId, null, deadlineError('queued'));
       } else {
-        sendResponse(item.messageId, result, null);
+        log('Executing tool:', item.toolName);
+        const result = await executeToolBounded(item.toolName, item.args);
+        if (result?.error) {
+          sendResponse(item.messageId, null, result.error);
+        } else {
+          sendResponse(item.messageId, result, null);
+        }
       }
     } catch (e) {
       log('Tool error:', item.toolName, e.message);
@@ -137,6 +176,7 @@ async function processQueue() {
     if (elapsed > 5000) log(`Slow tool: ${item.toolName} took ${Math.round(elapsed)}ms`);
   }
   state.queueRunning = false;
+  state.currentCall = null;
   // Cleared as soon as the queue is idle. By now the stop has been honoured —
   // queued work was dropped and the in-flight tool has returned (handleType
   // breaks out of its loop on the flag) — so holding it any longer would only
@@ -148,18 +188,20 @@ async function processQueue() {
 // debugger that cannot attach, a CDP command that never returns) used to wedge the
 // global FIFO queue permanently: queueRunning stayed true, every later call from
 // every client was queued but never run, and only an extension reload recovered it.
-// Bounding the await turns that into one failed call. The orphaned work still runs
-// to completion — same as the server-side 30s timeout, which also gives up waiting
-// without stopping the extension. 60s sits above the longest legitimate tool
-// (wait_for caps at 30s) so it only ever fires on a genuine hang.
-const TOOL_HANG_MS = 60000;
+// Bounding the await turns that into one failed call.
+//
+// 这个上限不再是写死的常数，而是从信封里的 deadline 推出来的：正常路径上
+// deadlineError 早就先触发了，这里只在「扩展自己没算准」时救队列。写死 60000 曾经
+// 比 server 的 30000 还大，那就等于永远不会生效。
+const HANG_GRACE_MS = 2000;
 
 async function executeToolBounded(toolName, args) {
   let timer;
+  const hangMs = Math.max(2500, remainingMs() + HANG_GRACE_MS);
   const guard = new Promise((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`Tool ${toolName} did not settle within ${TOOL_HANG_MS}ms — abandoned so the queue keeps moving`)),
-      TOOL_HANG_MS
+      () => reject(new Error(`Tool ${toolName} did not settle within ${Math.round(hangMs)}ms — abandoned so the queue keeps moving`)),
+      hangMs
     );
   });
   try {
@@ -289,6 +331,11 @@ async function callContentScript(tabId, func, args = []) {
 // client. Bounding the injection turns a permanent stall into a fast local failure.
 const INJECT_TIMEOUT_MS = 8000;
 
+// 注入本身的上限也要受剩余预算约束：只剩 2s 的调用不该再花 8s 去注入。
+function injectTimeoutMs() {
+  return Math.max(1000, Math.min(INJECT_TIMEOUT_MS, remainingMs()));
+}
+
 function withTimeout(promise, ms, label) {
   let timer;
   return Promise.race([
@@ -309,7 +356,7 @@ async function ensureContentScripts(tabId) {
         target: { tabId },
         func: () => !!(globalThis.__ccAccessibilityTree && globalThis.__ccBridge && globalThis.__ccAutoCapture)
       }),
-      INJECT_TIMEOUT_MS, 'content-script probe');
+      injectTimeoutMs(), 'content-script probe');
     if (r?.result === true) return;
   } catch (e) {
     // A probe that hangs means the tab is asleep — injecting would hang too, so
@@ -326,7 +373,7 @@ async function ensureContentScripts(tabId) {
         'content-scripts/visual-indicator.js'
       ]
     }),
-    INJECT_TIMEOUT_MS, 'content-script injection');
+    injectTimeoutMs(), 'content-script injection');
 }
 
 // The action resolver is only needed by resolve_actions, so it is injected here
@@ -394,7 +441,8 @@ async function handleNavigate(tabId, args) {
 }
 
 async function waitForLoad(tabId, ms) {
-  for (const start = Date.now(); Date.now() - start < ms;) {
+  const budget = Math.min(ms, remainingMs());
+  for (const start = Date.now(); Date.now() - start < budget;) {
     try { if ((await chrome.tabs.get(tabId)).status === 'complete') return true; } catch { return false; }
     await sleep(100);
   }
@@ -602,11 +650,17 @@ async function verifyAction(tabId, before) {
   if (!before) return null;
   const start = Date.now();
   let after = null;
+  // 验证是锦上添花：剩余预算不够就别再烧，直接说「没验完」。
+  let outOfBudget = false;
   while (Date.now() - start < VERIFY_SETTLE_MS) {
+    if (remainingMs() <= 400) { outOfBudget = true; break; }
     await sleep(VERIFY_POLL_MS);
     after = await getSignature(tabId);
     if (after && (after.sig !== before.sig || after.url !== before.url || after.title !== before.title)) break;
   }
+  const budgetNote = outOfBudget
+    ? ' [verify] 剩余预算不足，验证提前结束——结论可能不准，别把它当证据。'
+    : '';
   if (!after) return '[verify] Could not read page state after the action — the tab may have closed.';
 
   const urlChanged = after.url !== before.url;
@@ -620,7 +674,7 @@ async function verifyAction(tabId, before) {
     const cap = after.truncated
       ? ' The page is large enough that the DOM fingerprint stopped counting past its cap, so a change below that point would not register — re-read the page rather than assuming the action missed.'
       : '';
-    return `[verify] ⚠️ No detectable change after ${Date.now() - start}ms. The click may have missed, hit a disabled or covered element, or the effect is visual-only. Re-read the page before the next step.${cap}`;
+    return `[verify] ⚠️ No detectable change after ${Date.now() - start}ms. The click may have missed, hit a disabled or covered element, or the effect is visual-only. Re-read the page before the next step.${cap}${budgetNote}`;
   }
 
   const noise = before.noisy
@@ -652,7 +706,7 @@ async function verifyAction(tabId, before) {
     } catch {}
   }
 
-  return `[verify] ✓ Page changed: ${parts.join('; ')}.${noise}${detail}`;
+  return `[verify] ✓ Page changed: ${parts.join('; ')}.${noise}${detail}${budgetNote}`;
 }
 
 async function handleComputer(tabId, args) {
@@ -801,14 +855,19 @@ async function handleType(tabId, args) {
   }
   if (run) runs.push(run);
 
+  let typed = 0;
   for (const r of runs) {
     if (state.stopRequested) break;
+    if (remainingMs() <= 500) {
+      return { error: { code: 'DEADLINE_EXCEEDED', stage: 'executing', message: `打到 ${typed}/${text.length} 个字符时预算用完。已输入的部分留在页面上，不要盲目重打整个字符串。` } };
+    }
     if (r === '\n') { await keyEventSimple(tabId, 'Enter', 13); }
     else if (r === '\t') { await keyEventSimple(tabId, 'Tab', 9); }
     else { await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: r }); }
+    typed += r.length;
     await sleep(5);
   }
-  return { content: [{ type: 'text', text: `Typed ${text.length} characters` }] };
+  return { content: [{ type: 'text', text: `Typed ${typed} characters` }] };
 }
 
 async function keyEventSimple(tabId, key, vk) {
@@ -1067,33 +1126,83 @@ async function handleGetPageMarkdown(tabId, args) {
 }
 
 // === JAVASCRIPT TOOL ===
+// 先只解析、不执行，决定用户给的是表达式还是语句序列。
+// 为什么非要有这一步：语句序列直接塞进 `await (...)` 会让**整个** payload 解析失败，
+// 页面内的 try/catch 救不了它（解析先于执行），语句形态就废了。compileScript 只编译
+// 不执行，毫秒级，而且语法错误意味着什么都没跑，不会重复劳动。
+// 注意它把编译失败报在**结果里**（`exceptionDetails`），不是靠 reject —— 这一点是在真机上
+// 才发现的：早先只判 reject 的版本把语句序列误判成表达式，直接报 "Unexpected token 'const'"。
+async function detectJsForm(tabId, code) {
+  try {
+    const result = await chrome.debugger.sendCommand({ tabId }, 'Runtime.compileScript', {
+      expression: `(${code})`, sourceURL: '', persistScript: false
+    });
+    return formFromProbe({ result });
+  } catch (e) {
+    return formFromProbe({ error: e.message });
+  }
+}
+
+// 只有一条路径：CDP Runtime.evaluate。旧实现在它前面还有一条 chrome.scripting
+// 快路径，但那条要在隔离世界里 eval，而 MV3 的 CSP 拦得住——实测它一次都没执行
+// 成功过，异常被 `catch {}` 吞掉，反而成了「失败静默」加「失败时跑两遍」的来源。
+// 删掉比修好划算。现在：成功返回数据，失败返回错误，超预算返回 JS_DEADLINE，
+// 而且**恰好执行一次**。
 async function handleJavaScript(tabId, args) {
   await ensureAttached(tabId);
   const code = args.text || '';
   if (code.length > 100000) return { error: { code: 'CODE_TOO_LONG', message: `Code exceeds 100K limit (${code.length} chars)` } };
 
-  let result;
-  try {
-    const [r] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (c) => { try { return { ok: true, val: (0, eval)(c) } } catch (e) { return { ok: false, err: e.message }; } },
-      args: [`(function(){ try { return (${code}) } catch(e) { ${code} } })()`]
-    });
-    if (r?.result?.ok) result = formatValue(r.result.val);
-  } catch {}
-  if (result === undefined) {
-    const cdpSend = (expr) => chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
-    const r1 = await cdpSend(`(${code})`);
-    if (!r1.exceptionDetails) { result = formatCDP(r1); }
-    else { const r2 = await cdpSend(`(async function(){ ${code} })()`); result = formatCDP(r2); }
-  }
-  if (result.length > 50000) result = result.slice(0, 50000) + '\n... [OUTPUT TRUNCATED]';
-  return { content: [{ type: 'text', text: result }] };
-}
+  const budget = budgetForJavaScript(remainingMs());
 
-function formatCDP(r) {
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'JS error');
-  return formatValue(r.result?.value);
+  const evaluate = async (form) => {
+    try {
+      return await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+        expression: buildEvaluateExpression(code, budget, form),
+        returnByValue: true,
+        awaitPromise: true,
+        // CDP 自带的超时（Experimental）：页面里那层 race 是主力，这个只是兜底，
+        // 所以多给 1s 让 race 先说话。
+        timeout: budget + 1000
+      });
+    } catch (e) {
+      if (/terminat|timeout/i.test(e.message || '')) return { cdpDeadline: true };
+      throw e;
+    }
+  };
+
+  let form = await detectJsForm(tabId, code);
+  let r = await evaluate(form);
+
+  // 这里的 exceptionDetails 只可能是「payload 自己没解析过」：用户代码的错误（包括运行时
+  // 的 SyntaxError）都在 payload 的 try/catch 里变成了返回值，不会冒到这里来。也就是说
+  // 这不是表达式 → 换语句形态重跑一次。**解析失败意味着刚才什么都没执行**，所以这样仍然
+  // 恰好执行一次。这层兜的是探测失效（方法不存在、老版本浏览器），不是主路径。
+  if (r?.exceptionDetails && form === 'expression') {
+    log('javascript_tool: 表达式形态没解析过，按语句序列重试');
+    form = 'statements';
+    r = await evaluate(form);
+  }
+
+  if (r?.cdpDeadline) {
+    return { error: { code: 'JS_DEADLINE', message: `CDP 在 ${budget + 1000}ms 处终止了这次执行。页面里没干完的活仍在继续，长循环请拆成多次调用。` } };
+  }
+  if (r?.exceptionDetails) {
+    const d = r.exceptionDetails.exception?.description || r.exceptionDetails.text || 'JS error';
+    return { error: { code: 'JS_ERROR', message: String(d).slice(0, 4000) } };
+  }
+
+  const c = classifyJsResult(r?.result?.value);
+  if (c.kind === 'deadline') {
+    return { error: { code: 'JS_DEADLINE', message: `页面内已跑满 ${c.ranMs}ms 仍未结束，按预算返回。那段活**仍在页面里继续**（CDP 取消不了一个正在 await 的循环），所以不要紧接着发一个会跟它打架的调用；长循环拆成多次调用，状态挂在 window 上，下次接着做。` } };
+  }
+  if (c.kind === 'error') {
+    return { error: { code: 'JS_ERROR', message: String(c.message).slice(0, 4000) } };
+  }
+
+  let out = formatValue(c.value);
+  if (out.length > 50000) out = out.slice(0, 50000) + '\n... [OUTPUT TRUNCATED]';
+  return { content: [{ type: 'text', text: out }] };
 }
 
 function formatValue(v) {
@@ -1188,7 +1297,9 @@ async function handleDismissDialog(tabId, args) {
 // === WAIT FOR ELEMENT / TEXT ===
 async function handleWaitFor(tabId, args) {
   await ensureContentScripts(tabId);
-  const timeout = args.timeout || 10000;
+  // server 给 wait_for 的预算 = args.timeout + 5s，所以正常情况下这里等于 args.timeout；
+  // 真正在削它的是「前面排队排掉的时间」。
+  const timeout = Math.max(300, Math.min(args.timeout || 10000, remainingMs() - 500));
   const selector = args.selector || null;
   const text = args.text || null;
 

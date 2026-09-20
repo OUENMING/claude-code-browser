@@ -2,6 +2,12 @@
 
 > 评审日期 2026-09-18 · 基线 `ee71e50`（clean tree，14 commits，最后活动 2026-09-14）
 > 词汇约定：**模块 (module)** / **接口 (interface)** / **深度 (depth)** / **seam** / **adapter** / **leverage** / **locality**。本文严格只用这几个词描述结构，不用「组件 / 服务 / API / 边界」。
+>
+> **复核 2026-09-20（基线 `692d557`）** —— 本文写于 `ee71e50`，此后接口面动过，读 §4/§5/§7 前先套用这四条：
+> 1. **工具是 16 个**（`resolve_actions` 在 `cff5110` 加入）：下文所有「15 个」按 16 读。`TOOLS` 现在 `mcp-server/index.js:310-327`；扩展 `TOOL_DEFINITIONS`（`background.js:25-41`）仍是 15 条、**少了 `resolve_actions`** ⇒ §5.1(a) 那句「两份 15 条完全一致」已不成立，漂移换了个方向。
+> 2. **D4 已落地**（见下），并修正了它两处前提：CDP 其实有 `Runtime.evaluate {timeout}` 与 `Runtime.terminateExecution`（不必只靠扩展侧放弃等待）；progress 通知**不**延长 Claude Code 的硬墙钟。落地方案、实测证据与未决问题见 `PLAN-DEADLINE-20260920.md`。
+> 3. §7.1 的两条失效机制已不成立：「CDP 调用无超时、无取消」现在是「有 deadline + CDP timeout，取消仍不可用」；「Stop 是单向开关」于 `692d557` 修（见 `CLAUDE.md` T3）。
+> 4. 行号普遍下移：`processQueue` `:145`、`executeToolBounded` `:198`、`ensureContentScripts` `:352`、`handleJavaScript` `:1149`、`TOOL_HANDLERS` `:1402`。
 
 ---
 
@@ -283,7 +289,9 @@ Claude Code ◄──stdio+JSON-RPC──► [ MCP adapter 模块 ]  ◄──do
 - **locality**：**这一条直接修掉 §5.4 的两个 bug**：`resetForNavigation` 在 `handleNavigate` 里调一次，导航后基线自动失效；`verifyAction` 的写回变成显式的 `setSnapshot`，可以被审计。
 - **删掉测试**：删除 `TabSession` 后「清理」这件事要在 3 处重现且会继续漏项 → 通过。
 
-### D4 · deadline 是这条 seam 缺的字段 —— **Worth exploring**（直接对应「高负载超时」）
+### D4 · deadline 是这条 seam 缺的字段 —— **Worth exploring**（直接对应「高负载超时」）· **已落地 2026-09-20**
+
+> 落地版本与本文的差异：`deadline` 用绝对时间戳随信封发（`mcp-server/index.js:304`），扩展侧 `remainingMs()` 推导兜底（`background.js:198`），server 预算按工具声明（`TOOLS` 里的 `budgetFor`）；**未做**本文设想的通用 `deadline` 参数透传 —— 预算表就是那张表。实测证据：`PLAN-DEADLINE-20260920.md`。
 
 - **问题**：`callExtension(tool, args, timeoutMs = 30000)`（`index.js:268`）的超时**只活在 seam 的这一侧**。扩展的 FIFO 队列（`background.js:113-140`）对调用者还剩多少预算一无所知，因此：
   - 队列里的等待时间对调用者不可见 → 一次 3 秒的操作可能因为前面排了 5 个调用而在第 30 秒被判超时；
@@ -322,9 +330,9 @@ Claude Code ◄──stdio+JSON-RPC──► [ MCP adapter 模块 ]  ◄──do
 
 | 机制 | 位置 | 后果 |
 |---|---|---|
-| 单队列全局串行 | `background.js:118-140` | 任一工具慢，全部工具慢 |
-| CDP 调用无超时、无取消 | 全文件（`chrome.debugger.sendCommand` 无 timeout） | 页面主线程卡住 → 队列永久卡住 → 所有工具在 server 侧 30s 超时 |
-| Stop 是**单向开关** | `stopRequested` 只在 :1221 被置 `true`，**全仓库没有任何地方置回 `false`** | 用户点一次页面上的「停止」按钮，队列就永久死亡，直到 service worker 被回收/扩展被重载。而 `visual-indicator.js` 的停止按钮是常驻的（:119-155） |
+| 单队列全局串行 | `background.js:145-178` | 任一工具慢，全部工具慢（**排队时间现在计入调用者自己的预算**，见 D4） |
+| ~~CDP 调用无超时、无取消~~ → **deadline + CDP timeout**（2026-09-20） | `background.js:145-205`、`deadline.js` | 页面主线程卡住 → 超时**在扩展侧**以 `DEADLINE_EXCEEDED` 返回，队列放行；**取消仍不可用**（页面里的活会继续跑，必须说清） |
+| ~~Stop 是**单向开关**~~ → **两条路都复位**（`692d557` 修） | `background.js:145-178`、`:1364` | 用户点一次停止按钮不再永久杀死队列（见 `CLAUDE.md` T3） |
 
 **关于「`javascript_tool` / `read_page` / `navigate` 在高负载下超时」—— 这是架构症状，不是这三个工具的 bug。** 具体地：
 

@@ -265,16 +265,52 @@ function becomeClient() {
 // ---------------------------------------------------------------------------
 // MCP tool wiring (identical in both modes — all calls go through extWs)
 // ---------------------------------------------------------------------------
-function callExtension(tool, args, timeoutMs = 30000) {
+// 每个调用等多久，按工具声明；并且和扩展侧是一对：server 预算减 DEADLINE_MARGIN_MS
+// 才是随信封发出去的 deadline，于是「超时」总是先在扩展侧以一条可读的错误返回，
+// 而不是变成传输层的 "Timeout calling X"、让扩展带着一个孤儿任务继续占着 FIFO 队列
+// （小红书抓帖第 4 篇就是这么连锁超时的）。
+// 上限 60000：Claude Code 会把超过 2 分钟的调用转到后台，再长就不该指望一次调用跑完。
+const DEADLINE_MARGIN_MS = 3000;
+const TOOL_BUDGET_MS = {
+  navigate: 20000,
+  read_page: 45000,
+  get_page_text: 45000,
+  get_page_markdown: 45000,
+  computer: 45000,
+  javascript_tool: 45000,
+  health_check: 15000,
+  tabs_context: 10000,
+  tabs_create: 10000,
+};
+const DEFAULT_TOOL_BUDGET_MS = 30000;
+
+// server 的计时器是「扩展还活着吗」的存活界，**不是**调度策略：它必须比扩展的执行
+// 截止时间更宽，才有机会收到「排队等到出局」那条答复——扩展要等前一个工具跑完才能
+// 开口，而排队时间不计入它自己的执行预算。给短预算的工具（tabs_context 10s）留出
+// 这一段，否则它排在长工具后面时会死在传输层，正是这次要消灭的那种超时。
+// 残留风险：队列里叠了两个长工具时仍可能在传输层超时——那要等 job/队列协议才能根治。
+const QUEUE_ALLOWANCE_MS = 20000;
+
+function budgetFor(tool, args) {
+  // wait_for 自带 timeout 参数：预算必须比它大，否则它必然先撞上传送超时。
+  if (tool === 'wait_for') return Math.min(60000, (args?.timeout || 10000) + 5000);
+  return TOOL_BUDGET_MS[tool] || DEFAULT_TOOL_BUDGET_MS;
+}
+
+function callExtension(tool, args, timeoutMs) {
   if (!extConnected || !extWs) throw new Error('Browser extension not connected');
   const id = msgId++;
+  const budgetMs = timeoutMs ?? budgetFor(tool, args);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error(`Timeout calling ${tool}`));
-    }, timeoutMs);
+      reject(new Error(`Timeout calling ${tool}: the extension never answered within ${budgetMs + QUEUE_ALLOWANCE_MS}ms (budget ${budgetMs}ms + ${QUEUE_ALLOWANCE_MS}ms queue allowance). Run health_check to see which hop is stuck.`));
+    }, budgetMs + QUEUE_ALLOWANCE_MS);
     pending.set(id, { resolve, reject, timer });
-    extWs.send(JSON.stringify({ type: 'tool_call', id, tool, args }));
+    extWs.send(JSON.stringify({
+      type: 'tool_call', id, tool, args,
+      deadline: Date.now() + budgetMs - DEADLINE_MARGIN_MS
+    }));
   });
 }
 
@@ -334,8 +370,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     return result;
   } catch (e) {
-    // tabs_context with disconnected extension → return health status instead of error
-    if (req.params.name === 'tabs_context') {
+    // 「扩展没连上」时给一句友好的空表；其它错误（真正的超时、排队出局的
+    // DEADLINE_EXCEEDED）**是诊断本身，不能吞** —— 把它们显示成「扩展断开了」会让
+    // 定位反向。实测踩过：一次合法的 stage:'queued' 答复就是这样被伪装成断开的。
+    if (req.params.name === 'tabs_context' && /not connected/i.test(e.message || '')) {
       return { content: [{ type: 'text', text: '[Browser MCP: Extension disconnected]\n(No active browser tabs)' }] };
     }
     return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };

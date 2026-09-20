@@ -62,7 +62,7 @@ Startup:
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `health_check` | — | Walk the chain hop by hop (MCP server → WebSocket → extension → content script → CDP) and report each one. Falls back to another tab when the active one can't be scripted. Use it first when a tool call misbehaves |
-| `javascript_tool` | `text`, `tabId?` | Execute JS in the page. 100K char limit. Double eval wrapping for expression/statement compatibility. CDP fallback if scripting.executeScript fails |
+| `javascript_tool` | `text`, `tabId?` | Execute JS in the page. 100K char limit. Expressions and statement sequences both work (parsed once, without executing, to pick the form). Runs **exactly once**; a failure comes back as `JS_ERROR` with the reason, an over-budget run as `JS_DEADLINE` — see "Per-call budget" |
 | `read_console_messages` | `tabId`, `onlyErrors?`, `pattern?`, `clear?`, `limit?` | Read console messages. Supports regex pattern filtering |
 | `read_network_requests` | `tabId`, `urlPattern?`, `clear?`, `limit?` | Read HTTP network requests with status codes |
 
@@ -78,6 +78,44 @@ Startup:
 | `dismiss_dialog` | `action`, `promptText?`, `tabId?` | Accept/dismiss native browser dialogs (alert/confirm/prompt/beforeunload). Supports prompt text input |
 
 ---
+
+### Per-call budget
+
+Every tool has a budget on the server side, and the extension's deadline is 3 seconds earlier than it — so a timeout always surfaces first as a readable error from the extension, instead of leaving the caller hanging on the transport layer while the extension keeps working on a result nobody wants.
+
+| Tool | Budget |
+|------|--------|
+| `javascript_tool` / `read_page` / `get_page_text` / `get_page_markdown` / `computer` | 45s |
+| `wait_for` | your `timeout` + 5s |
+| `navigate` | 20s |
+| `health_check` | 15s |
+| `tabs_context` / `tabs_create` | 10s |
+| everything else | 30s |
+
+The queue is **strictly serial** (one tool at a time), so waiting in line counts against your own budget. A timeout tells you which half it was:
+
+- `stage: 'queued'` — an earlier tool ate the budget; this call never started. Just retry.
+- `stage: 'executing'` — this call itself ran too long.
+
+#### Splitting a long extraction
+
+Anything past roughly 25 seconds (scrolling a comment thread to the end, say) should be several calls, with the state parked on `window`:
+
+```js
+// Calls 1..N: scroll a few rounds, then report progress
+(async () => {
+  window.__ccC = window.__ccC || { items: new Set(), rounds: 0 };
+  for (let i = 0; i < 4; i++) { window.scrollBy(0, 2000); await new Promise(r => setTimeout(r, 700)); }
+  window.__ccC.rounds += 4;
+  document.querySelectorAll('.comment-item').forEach(n => window.__ccC.items.add(n.innerText.slice(0, 80)));
+  return JSON.stringify({ rounds: window.__ccC.rounds, collected: window.__ccC.items.size });
+})()
+
+// Final call: take the data
+JSON.stringify([...window.__ccC.items])
+```
+
+**Why a bigger budget is not the answer**: CDP has no reliable cancel — it can terminate only the *current* script execution, and a scroll loop awaits a timer on every round, so the outer execution ended long ago. After a timeout returns, **the page work is still running**. Splitting the work beats giving it a longer budget, and it keeps you from firing a conflicting call right after.
 
 ## Content Extraction Guide
 
@@ -146,7 +184,7 @@ callExtension(tool, args):
 
 ### FIFO command queue
 
-Strict FIFO order per extension instance. Each tool gets a 5-second slow-tool warning. `stopRequested` allows mid-execution abort from the popup.
+Strict FIFO order per extension instance. Every call carries a deadline computed from its own budget, so queue wait counts against the caller — one slow tool no longer makes every later call die at the transport layer with an opaque `Timeout calling X`. Tools slower than 5s are logged. `stopRequested` allows mid-execution abort from the popup, and is reset both when the queue goes idle and when a stop arrives with nothing in flight. Details in "Per-call budget" above.
 
 ### CDP management
 
